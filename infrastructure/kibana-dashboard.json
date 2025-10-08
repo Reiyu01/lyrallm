@@ -1,0 +1,21 @@
+{
+  "version": "8.0.0",
+  "objects": [
+    {
+      "id": "semantic-kernel-token-dashboard",
+      "type": "dashboard",
+      "attributes": {
+        "title": "Semantic Kernel Token Usage Dashboard",
+        "hits": 0,
+        "description": "Enterprise-grade token usage monitoring and cost analysis",
+        "panelsJSON": "[{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":0,\"w\":24,\"h\":15,\"i\":\"1\"},\"panelIndex\":\"1\",\"embeddableConfig\":{},\"panelRefName\":\"panel_1\"}]",
+        "optionsJSON": "{\"useMargins\":true,\"syncColors\":false,\"hidePanelTitles\":false}",
+        "version": 1,
+        "timeRestore": false,
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": "{\"query\":{\"query\":\"\",\"language\":\"kuery\"},\"filter\":[]}"
+        }
+      }
+    }
+  ]
+}

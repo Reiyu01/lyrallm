@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # Redis 集群 - 高可用
+  redis-master:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - token-tracking
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  redis-replica:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --replicaof redis-master 6379
+    depends_on:
+      - redis-master
+    networks:
+      - token-tracking
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  # 高性能 Token Consumer 集群
+  token-consumer:
+    build:
+      context: .
+      dockerfile: docker/consumer.dockerfile
+    environment:
+      - REDIS_HOST=redis-master
+      - LOGSTASH_HOST=elk.54ucl.com
+      - WORKER_COUNT=8
+      - BATCH_SIZE=500
+    depends_on:
+      - redis-master
+    networks:
+      - token-tracking
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  # Semantic Kernel API - 負載均衡
+  sk-api:
+    build:
+      context: .
+      dockerfile: docker/api.dockerfile
+    environment:
+      - REDIS_HOST=redis-master
+      - HIGH_PERFORMANCE_MODE=true
+    depends_on:
+      - redis-master
+    networks:
+      - token-tracking
+    deploy:
+      replicas: 4
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/chat/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 負載均衡器
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - sk-api
+    networks:
+      - token-tracking
+
+  # 監控服務
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - token-tracking
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - token-tracking
+
+networks:
+  token-tracking:
+    driver: bridge
+
+volumes:
+  redis_data:
+  grafana_data:

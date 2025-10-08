@@ -1,0 +1,76 @@
+# Semantic Kernel 模型配置
+server:
+  host: "0.0.0.0"
+  port: 8081
+  debug: false
+
+models:
+  default_model: "gpt-4o-azure"
+  
+  available_models:
+    - name: "gpt-4o-azure"
+      provider: "azure_openai"
+      endpoint: "${AZURE_OPENAI_ENDPOINT}"
+      api_key: "${AZURE_OPENAI_API_KEY}"
+      deployment_name: "${AZURE_OPENAI_GPT4O_DEPLOYMENT_NAME}"
+      api_version: "${AZURE_OPENAI_API_VERSION}"
+      enabled: true
+      description: "Azure OpenAI GPT-4o via Semantic Kernel"
+      max_tokens: 4096
+      temperature: 0.7
+
+    - name: "o3-mini-azure"
+      provider: "azure_openai"
+      endpoint: "${AZURE_OPENAI_ENDPOINT}"
+      api_key: "${AZURE_OPENAI_API_KEY}"
+      deployment_name: "${AZURE_OPENAI_O3MINI_DEPLOYMENT_NAME}"
+      api_version: "${AZURE_OPENAI_API_VERSION}"
+      enabled: true
+      description: "Azure OpenAI o3-mini via Semantic Kernel"
+      max_tokens: 4096
+      temperature: 0.7
+
+    - name: "gpt-4o"
+      provider: "openai"
+      endpoint: "${OPENAI_API_BASE_URL}"
+      api_key: "${OPENAI_API_KEY}"
+      enabled: false
+      description: "OpenAI GPT-4o via Semantic Kernel"
+      max_tokens: 4096
+      temperature: 0.7
+
+    - name: "llama2-ollama"
+      provider: "ollama"
+      endpoint: "${OLLAMA_BASE_URL}"
+      enabled: false
+      description: "Llama 2 via Ollama and Semantic Kernel"
+      max_tokens: 2048
+      temperature: 0.8
+
+providers:
+  azure_openai:
+    endpoint: "${AZURE_OPENAI_ENDPOINT}"
+    api_key: "${AZURE_OPENAI_API_KEY}"
+    api_version: "${AZURE_OPENAI_API_VERSION}"
+    timeout: 60
+    
+  openai:
+    base_url: "${OPENAI_API_BASE_URL}"
+    api_key: "${OPENAI_API_KEY}"
+    timeout: 60
+    
+  ollama:
+    base_url: "${OLLAMA_BASE_URL}"
+    timeout: 30
+
+semantic_kernel:
+  # Semantic Kernel 特定設定
+  plugins_directory: "./plugins"
+  memory_store: "sqlite"
+  enable_planner: true
+  enable_functions: true
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "semantic_kernel.log"

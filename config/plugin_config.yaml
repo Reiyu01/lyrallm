@@ -1,0 +1,65 @@
+# Plugin 功能配置文件
+# 定義前端 features 參數與對應的 plugins 映射關係
+
+plugins:
+  web_search:
+    # 前端參數名稱
+    feature_name: "web_search"
+    # Plugin 類別路徑
+    plugin_class: "plugins.ollama_web_search_plugin.OllamaWebSearchPlugin"
+    # Plugin 配置檢查
+    config_module: "plugins.ollama_config"
+    config_check_method: "is_configured"
+    # Plugin 在 kernel 中的名稱
+    kernel_name: "OllamaWebSearch"
+    # 是否必需配置才能啟用
+    require_config: true
+    # 描述
+    description: "Ollama Web Search Plugin - 提供網路搜尋功能"
+    # 細項參數定義
+    params_model:
+      class_name: "WebSearchParams"
+      description: "Web Search Plugin 細項參數"
+      fields:
+        search_modes:
+          type: "List[str]"
+          optional: true
+          description: "搜尋模式"
+          default: null
+          choices: ["web", "news", "academic"]
+        search_recency:
+          type: "str"
+          optional: true
+          description: "搜尋時間範圍"
+          default: null
+          choices: ["day", "week", "month", "year", "all"]
+        search_domain_filter:
+          type: "List[str]"
+          optional: true
+          description: "限定搜尋來源網站"
+          default: null
+        search_options:
+          type: "Dict[str, Any]"
+          optional: true
+          description: "進階搜尋參數"
+          default: null
+    
+  image_generation:
+    feature_name: "image_generation"
+    plugin_class: "plugins.image_generation_plugin.ImageGenerationPlugin"
+    config_module: "plugins.image_config"
+    config_check_method: "is_configured"
+    kernel_name: "ImageGeneration"
+    require_config: true
+    description: "Image Generation Plugin - 提供圖像生成功能"
+    enabled: true  # 啟用此功能
+    
+
+# 全域設定
+settings:
+  # 當 plugin 配置檢查失敗時的行為
+  on_config_fail: "warn"  # "warn", "error", "skip"
+  # 是否記錄詳細的 plugin 載入資訊
+  verbose_logging: true
+  # 載入失敗時是否繼續
+  continue_on_error: true
