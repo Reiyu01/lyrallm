@@ -11,7 +11,7 @@ print the DSN and a psql command you can run manually.
 """
 # def get_db_config():
 #     try:
-#         from config.config_manager import config_manager
+#         from lyrallm.config.config_manager import config_manager
 #         cfg = config_manager.config.get('database', {})
 #         return cfg
 #     except Exception:
@@ -29,11 +29,11 @@ if str(ROOT) not in sys.path:
 
 # Try to import the project's config_manager in a robust way
 try:
-    from semantic_kernel.config.config_manager import config_manager
+    from lyrallm.config.config_manager import config_manager
 except Exception:
     try:
         # fallback to relative package name if project layout differs
-    from semantic_kernel.config.config_manager import config_manager
+    from lyrallm.config.config_manager import config_manager
     except Exception:
         print("Failed to import config_manager from project. Ensure project layout is correct.")
         raise

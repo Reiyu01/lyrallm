@@ -15,13 +15,13 @@ load_dotenv()
 # 添加專案路徑
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-import semantic_kernel as sk
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
-from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
-from semantic_kernel.contents.chat_history import ChatHistory
-from semantic_kernel.functions.kernel_arguments import KernelArguments
-from semantic_kernel.kernel import Kernel
-from semantic_kernel.connectors.ai import FunctionChoiceBehavior
+import lyrallm as sk
+from lyrallm.connectors.ai.open_ai import AzureChatCompletion
+from lyrallm.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
+from lyrallm.contents.chat_history import ChatHistory
+from lyrallm.functions.kernel_arguments import KernelArguments
+from lyrallm.kernel import Kernel
+from lyrallm.connectors.ai import FunctionChoiceBehavior
 
 
 

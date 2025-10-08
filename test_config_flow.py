@@ -14,7 +14,7 @@ def test_config_flow():
     
     try:
         # 測試簡化的 Features 模型
-        from config.simple_features import Features
+        from lyrallm.config.simple_features import Features
         
         # 測試 1: 無功能
         features1 = Features()
@@ -47,7 +47,7 @@ def test_agent_mode_logic():
     print("="*40)
     
     try:
-        from config.simple_features import Features
+        from lyrallm.config.simple_features import Features
         
         # 模擬 chat.py 中的邏輯
         def should_use_agent_mode(features):
@@ -89,7 +89,7 @@ def check_parameter_consistency():
     print("="*40)
     
     try:
-        from config.simple_features import Features
+        from lyrallm.config.simple_features import Features
         
         # 測試參數傳遞鏈路
         print("參數傳遞鏈路測試:")

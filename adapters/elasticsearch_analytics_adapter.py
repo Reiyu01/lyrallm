@@ -6,7 +6,7 @@ can be used interchangeably with PostgresAdapter via the factory.
 from typing import Dict, Any, List, Optional
 import logging
 from .es_client import get_es_client, get_es_index
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 

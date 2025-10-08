@@ -11,7 +11,7 @@ when necessary so callers can `await embed()`.
 """
 from typing import List
 import asyncio
-from semantic_kernel.config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 import logging
 
 logger = logging.getLogger(__name__)

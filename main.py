@@ -1,3 +1,21 @@
+"""
+Ensure repo root is on sys.path so this file can be executed from inside the `lyrallm/` folder.
+This small snippet inserts the repository root (parent of `lyrallm`) into sys.path when necessary.
+"""
+import os
+import sys
+_here = os.path.abspath(os.path.dirname(__file__))
+# Candidate repo roots: parent of lyrallm (for main.py), or parent of parent (for scripts)
+candidates = [
+    os.path.abspath(os.path.join(_here, "..")),
+    os.path.abspath(os.path.join(_here, "..", "..")),
+]
+for c in candidates:
+    if os.path.isdir(os.path.join(c, "lyrallm")) and c not in sys.path:
+        sys.path.insert(0, c)
+        break
+
+# 10/8
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,7 +28,7 @@ from dotenv import load_dotenv
 # 載入環境變數
 load_dotenv()
 
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from api.models import router as models_router
 from api.chat import router as chat_router
 

@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 #10/2 : 16:09
 try:
-    from config.config_manager import config_manager
+    from lyrallm.config.config_manager import config_manager
 except Exception:
     # Keep module import-light; some execution paths may not need config_manager.
     config_manager = None

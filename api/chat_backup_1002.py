@@ -7,7 +7,7 @@ import json
 import asyncio
 import uuid
 from datetime import datetime
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 # Initialize logger early
 logger = logging.getLogger(__name__)
@@ -18,13 +18,13 @@ from logger_service.event_bus import event_bus
 from logger_service.token_calculator import compute_token_usage
 
 # Semantic Kernel imports
-import semantic_kernel as sk
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatCompletion
-from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
-from semantic_kernel.contents.chat_history import ChatHistory
-from semantic_kernel.contents.chat_message_content import ChatMessageContent
-from semantic_kernel.connectors.ai import FunctionChoiceBehavior
-from semantic_kernel.connectors.ai.open_ai import OpenAIChatPromptExecutionSettings
+import lyrallm as sk
+from lyrallm.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatCompletion
+from lyrallm.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
+from lyrallm.contents.chat_history import ChatHistory
+from lyrallm.contents.chat_message_content import ChatMessageContent
+from lyrallm.connectors.ai import FunctionChoiceBehavior
+from lyrallm.connectors.ai.open_ai import OpenAIChatPromptExecutionSettings
 
 # Ollama Web Search Plugin imports
 try:
@@ -487,7 +487,7 @@ async def track_token_usage(request_id: str, model_name: str, usage: Optional[Ch
     """
     try:
     # Ensure config_manager is available in this async context
-    #from config.config_manager import config_manager
+    #from lyrallm.config.config_manager import config_manager
 #10/2
     # SK 只負責基本的資料準備
         cost_usd = 0.0

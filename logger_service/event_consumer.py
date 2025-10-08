@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from logger_service.handlers import get_handlers
 
 logger = logging.getLogger(__name__)

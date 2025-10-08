@@ -7,8 +7,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from semantic_kernel.config.plugin_manager import plugin_manager
-from config.dynamic_features import DynamicFeaturesFactory
+from lyrallm.config.plugin_manager import plugin_manager
+from lyrallm.config.dynamic_features import DynamicFeaturesFactory
 import json
 
 def test_api_flow():

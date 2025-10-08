@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 # Ensure repository root (parent of semantic_kernel) is on sys.path so
-# `import semantic_kernel.*` works when running the script from repo root.
+# `import lyrallm.*` works when running the script from repo root.
 repo_root = Path(__file__).resolve().parents[2]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
@@ -20,8 +20,8 @@ if str(semantic_pkg_dir) not in sys.path:
     sys.path.insert(0, str(semantic_pkg_dir))
 
 try:
-    from semantic_kernel.semantic_router import SemanticRouter
-    from semantic_kernel.config.config_manager import config_manager
+    from lyrallm.semantic_router import SemanticRouter
+    from lyrallm.config.config_manager import config_manager
 except ModuleNotFoundError:
     # Fallback: load modules directly by file path (robust when package layout isn't importable)
     import importlib.util

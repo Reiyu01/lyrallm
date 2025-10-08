@@ -177,7 +177,7 @@ if __name__ == "__main__":
     import os
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from semantic_kernel.config.plugin_manager import plugin_manager
+    from lyrallm.config.plugin_manager import plugin_manager
     
     print("=== 動態 Features 模型測試 ===")
     

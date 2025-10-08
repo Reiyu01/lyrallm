@@ -105,8 +105,8 @@ async def test_semantic_kernel_integration():
     print("\n\n=== Semantic Kernel 整合測試 ===\n")
     
     try:
-        import semantic_kernel as sk
-        from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
+        import lyrallm as sk
+        from lyrallm.connectors.ai.open_ai import OpenAIChatCompletion
         
         # 創建 Kernel
         kernel = sk.Kernel()

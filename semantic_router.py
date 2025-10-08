@@ -6,9 +6,9 @@ self-contained.
 """
 import asyncio
 from typing import List, Dict, Any
-from config.config_manager import config_manager
-from adapters.elasticsearch_adapter import ElasticsearchAdapter
-from adapters.factory import get_adapter
+from lyrallm.config.config_manager import config_manager
+from lyrallm.adapters.elasticsearch_adapter import ElasticsearchAdapter
+from lyrallm.adapters.factory import get_adapter
 from embedding_provider import get_default_provider
 import logging
 

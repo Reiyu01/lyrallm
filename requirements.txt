@@ -9,7 +9,6 @@ azure-identity
 aiofiles
 python-dotenv
 requests
-redis-server
 redis
 python-logstash
 loguru
@@ -17,6 +16,4 @@ httpx
 tenacity
 pydantic
 asyncpg
-psycopg2
-https
 elasticsearch

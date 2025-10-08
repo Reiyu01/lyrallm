@@ -11,7 +11,7 @@ __all__ = ["config_manager", "plugin_manager", "DynamicFeaturesFactory"]
 """semantic_kernel.config package
 
 This module re-exports common helpers so callers can do:
-  from semantic_kernel.config import config_manager
+  from lyrallm.config import config_manager
 
 Keep the file minimal to avoid side-effects on import.
 """

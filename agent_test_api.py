@@ -19,7 +19,7 @@ from typing import Dict, Any, Optional, List
 import logging
 
 # 本地匯入
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from agents.practical_agent_orchestrator import create_practical_agent_orchestrator
 
 # 設置日誌

@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from api.chat import Features
-from semantic_kernel.config.plugin_manager import plugin_manager
+from lyrallm.config.plugin_manager import plugin_manager
 
 def test_config_driven_plugins():
     """測試配置驅動的 Plugin 系統"""

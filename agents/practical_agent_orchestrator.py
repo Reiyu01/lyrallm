@@ -11,7 +11,7 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAICha
 from semantic_kernel.functions import kernel_function
 from semantic_kernel.contents.chat_message_content import ChatMessageContent
 from semantic_kernel.contents.chat_history import ChatHistory
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ FOCUS: [重點關注的資訊類型]
             
             # 執行網路搜尋
             try:
-                from semantic_kernel.functions.kernel_arguments import KernelArguments
+                from lyrallm.functions.kernel_arguments import KernelArguments
                 
                 search_args = KernelArguments(query=user_input)
                 search_result = await self.kernel.invoke(

@@ -5,14 +5,14 @@ import time
 import logging
 import json
 import asyncio
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 # Semantic Kernel imports
-import semantic_kernel as sk
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatCompletion
-from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
-from semantic_kernel.contents.chat_history import ChatHistory
-from semantic_kernel.contents.chat_message_content import ChatMessageContent
+import lyrallm as sk
+from lyrallm.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatCompletion
+from lyrallm.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
+from lyrallm.contents.chat_history import ChatHistory
+from lyrallm.contents.chat_message_content import ChatMessageContent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

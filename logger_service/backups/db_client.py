@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Optional
 from datetime import datetime
-from semantic_kernel.config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 

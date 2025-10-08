@@ -2,7 +2,7 @@ import time
 import logging
 import asyncio
 from typing import Optional, List, Dict, Any
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatCompletion

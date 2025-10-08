@@ -6,7 +6,7 @@ directly; use close_es_client() if needed during shutdown.
 """
 from typing import Optional
 from elasticsearch import AsyncElasticsearch
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 import logging
 
 logger = logging.getLogger(__name__)

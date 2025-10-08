@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+# Ensure repo root is on sys.path so running this script from within lyrallm/scripts works
+import os, sys
+_here = os.path.abspath(os.path.dirname(__file__))
+candidates = [
+    os.path.abspath(os.path.join(_here, "..")),
+    os.path.abspath(os.path.join(_here, "..", "..")),
+]
+for c in candidates:
+    if os.path.isdir(os.path.join(c, "lyrallm")) and c not in sys.path:
+        sys.path.insert(0, c)
+        break
+
+        #10/8
 """
 Interactive chat CLI to call the endpoints exposed by main.py.
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List, Dict
 import time
 import logging
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

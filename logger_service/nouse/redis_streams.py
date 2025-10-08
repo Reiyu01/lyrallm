@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from typing import Any, Callable, Optional
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 

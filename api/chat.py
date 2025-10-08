@@ -7,14 +7,14 @@ import json
 import asyncio
 import uuid
 from datetime import datetime
-from config.config_manager import config_manager
-from semantic_router import SemanticRouter
-from model_executor import get_default_executor
+from lyrallm.config.config_manager import config_manager
+from lyrallm.semantic_router import SemanticRouter
+from lyrallm.model_executor import get_default_executor
 
 # Token tracking imports - 高性能版本
-from logger_service import TokenUsage
-from logger_service.event_bus import event_bus
-from logger_service.token_calculator import compute_token_usage
+from lyrallm.logger_service import TokenUsage
+from lyrallm.logger_service.event_bus import event_bus
+from lyrallm.logger_service.token_calculator import compute_token_usage
 
 # Semantic Kernel imports
 import semantic_kernel as sk

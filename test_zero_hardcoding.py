@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from semantic_kernel.config.dynamic_features import DynamicFeaturesFactory
+from lyrallm.config.dynamic_features import DynamicFeaturesFactory
 
 class MockPluginManager:
     """模擬 Plugin 管理器（包含失敗情況）"""

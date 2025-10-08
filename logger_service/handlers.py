@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from typing import List, Dict, Any
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class DbHandler(BaseHandler):
 
     def __init__(self):
         # use adapter factory for pluggable backends
-        from adapters.factory import get_adapter
+    from lyrallm.adapters.factory import get_adapter
         self._adapter = get_adapter('analytics')
 
     async def handle(self, event: Dict[str, Any]):

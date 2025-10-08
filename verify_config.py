@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from semantic_kernel.config.plugin_manager import plugin_manager
+from lyrallm.config.plugin_manager import plugin_manager
 import json
 
 def verify_plugin_config():
