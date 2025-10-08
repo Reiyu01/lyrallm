@@ -724,15 +724,19 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
             
             # 記錄前端 features 設定
             if request.features:
-                enabled_features = request.features.get_enabled_features()
+                # 手動檢查啟用的功能
+                enabled_features = []
+                if request.features.web_search:
+                    enabled_features.append("web_search")
+                if request.features.image_generation:
+                    enabled_features.append("image_generation")
+                if request.features.code_interpreter:
+                    enabled_features.append("code_interpreter")
+                
                 logger.info(f"[{request_id}] 前端啟用功能: {enabled_features if enabled_features else '無'}")
                 
-                # 動態記錄細項參數
-                model_data = request.features.model_dump(exclude_none=True)
-                for field_name, value in model_data.items():
-                    if field_name.endswith('_params') and value is not None:
-                        feature_name = field_name.replace('_params', '')
-                        logger.info(f"[{request_id}] {feature_name.title()} 參數: {value}")
+                # 記錄各個功能的狀態
+                logger.info(f"[{request_id}] Features 詳情: web_search={request.features.web_search}, image_generation={request.features.image_generation}, code_interpreter={request.features.code_interpreter}")
             else:
                 logger.info(f"[{request_id}] 前端未指定功能，使用基本聊天模式")
             

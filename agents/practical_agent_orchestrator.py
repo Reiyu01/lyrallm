@@ -175,7 +175,7 @@ FOCUS: [重點關注的資訊類型]
             
             # 執行網路搜尋
             try:
-                from lyrallm.functions.kernel_arguments import KernelArguments
+                from semantic_kernel.functions.kernel_arguments import KernelArguments
                 
                 search_args = KernelArguments(query=user_input)
                 search_result = await self.kernel.invoke(
