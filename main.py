@@ -51,7 +51,7 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     """應用生命週期管理"""
     # 啟動
-    logger.info("🚀 Semantic Kernel API Gateway 啟動中...")
+    logger.info("🚀 LyraLLM AI Gateway 啟動中...")
     
     # 檢查配置
     enabled_models = config_manager.get_available_models()
@@ -63,12 +63,30 @@ async def lifespan(app: FastAPI):
     for model in enabled_models:
         logger.info(f"  ✅ {model['name']} ({model['provider']})")
     
-    logger.info("✨ Semantic Kernel API Gateway 啟動完成!")
+    # 初始化企業級模型管理器
+    try:
+        from lyrallm.core.model_manager import get_model_manager
+        model_manager = await get_model_manager()
+        logger.info("🏥 企業級模型健康監控已啟用")
+    except Exception as e:
+        logger.warning(f"⚠️ 模型管理器初始化失敗: {e}")
+    
+    logger.info("✨ LyraLLM AI Gateway 啟動完成!")
     
     yield
     
     # 關閉
-    logger.info("🛑 Semantic Kernel API Gateway 正在關閉...")
+    logger.info("🛑 LyraLLM AI Gateway 正在關閉...")
+    
+    # 關閉模型管理器
+    try:
+        from lyrallm.core.model_manager import get_model_manager_sync
+        model_manager = get_model_manager_sync()
+        if model_manager:
+            await model_manager.stop()
+            logger.info("🏥 模型管理器已關閉")
+    except Exception as e:
+        logger.warning(f"⚠️ 模型管理器關閉失敗: {e}")
 
 # 創建 FastAPI 應用
 app = FastAPI(
@@ -176,8 +194,24 @@ async def get_api_info():
     server_config = config_manager.get_server_config()
     sk_config = config_manager.get_semantic_kernel_config()
     
+    # 獲取模型健康狀態
+    model_status = {}
+    try:
+        from lyrallm.core.model_manager import get_model_manager_sync
+        model_manager = get_model_manager_sync()
+        if model_manager:
+            healthy_models = model_manager.get_healthy_models()
+            all_metrics = model_manager.get_all_metrics()
+            model_status = {
+                "healthy_count": len(healthy_models),
+                "total_count": len(all_metrics),
+                "healthy_models": healthy_models
+            }
+    except Exception as e:
+        logger.warning(f"Failed to get model status: {e}")
+    
     return {
-        "api_name": "Semantic Kernel API Gateway",
+        "api_name": "LyraLLM AI Gateway",
         "version": "1.0.0",
         "server_config": {
             "host": server_config.get('host', '0.0.0.0'),
@@ -190,8 +224,44 @@ async def get_api_info():
             "enable_planner": sk_config.get('enable_planner', True),
             "enable_functions": sk_config.get('enable_functions', True)
         },
+        "model_status": model_status,
         "timestamp": int(time.time())
     }
+
+@app.get("/api/models/health")
+async def get_models_health():
+    """取得模型健康狀態詳細資訊"""
+    try:
+        from lyrallm.core.model_manager import get_model_manager_sync
+        model_manager = get_model_manager_sync()
+        
+        if not model_manager:
+            return {"error": "Model manager not initialized"}
+        
+        all_metrics = model_manager.get_all_metrics()
+        
+        health_report = {
+            "timestamp": int(time.time()),
+            "total_models": len(all_metrics),
+            "healthy_models": len(model_manager.get_healthy_models()),
+            "models": {}
+        }
+        
+        for name, metrics in all_metrics.items():
+            health_report["models"][name] = {
+                "status": metrics.status.value,
+                "total_requests": metrics.total_requests,
+                "success_rate": (1.0 - metrics.error_rate) if metrics.total_requests > 0 else 1.0,
+                "avg_latency_ms": metrics.avg_latency_ms,
+                "last_success": metrics.last_success.isoformat() if metrics.last_success else None,
+                "last_failure": metrics.last_failure.isoformat() if metrics.last_failure else None
+            }
+        
+        return health_report
+        
+    except Exception as e:
+        logger.error(f"Failed to get model health: {e}")
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     # 取得伺服器配置

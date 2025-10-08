@@ -8,8 +8,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from lyrallm.config.config_manager import config_manager
-from lyrallm.semantic_router import SemanticRouter
-from lyrallm.model_executor import get_default_executor
+from lyrallm.core import get_default_executor
 
 # Token tracking imports - 高性能版本
 from lyrallm.logger_service import TokenUsage
@@ -108,12 +107,8 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionChoice]
     usage: ChatCompletionUsage
 
-class SemanticKernelService:
-    """Semantic Kernel 服務類別"""
-    
-    def __init__(self):
-        self.kernels = {}  # 存儲不同模型的 kernel 實例
-        self.chat_services = {}  # 存儲聊天服務實例
+# Deprecated: SemanticKernelService replaced by unified ModelExecutor
+# All kernel management now handled by ModelExecutor for consistency
     
     async def _load_plugins(self, kernel: sk.Kernel, model_name: str, features: Optional[Features] = None) -> int:
         """在這個架構中，Plugin 由 Agent 協調器管理，此方法主要用於基本聊天模式"""
@@ -682,79 +677,43 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
                 # 降級到傳統模式
                 agent_mode_enabled = False
         
-        # 傳統模式處理（原有邏輯）
+        # Standard model processing (optimized with new ModelExecutor)
         if not agent_mode_enabled:
-            logger.info(f"[{request_id}] 使用傳統 Semantic Kernel 模式")
+            logger.info(f"[{request_id}] Processing with standard model execution")
             
-            # If frontend asked for auto routing, call the semantic router to pick a model
-            chosen_model_name = request.model
-            routing_info = None
-            if request.model == 'auto':
-                try:
-                    # prefer the last user message as the routing query, fallback to concatenation
-                    user_msgs = [m.content for m in request.messages if m.role == 'user']
-                    query = user_msgs[-1] if user_msgs else ' '.join([m.content for m in request.messages])
-                    logger.info(f"[{request_id}] Auto-routing query: {query}")
-                    router = SemanticRouter()
-                    # do not force index creation here; router will perform search
-                    route_result = await router.route(query)
-                    # route_result expected shape: {'reply':..., 'routing': {...}}
-                    routing_info = route_result.get('routing') if isinstance(route_result, dict) else None
-                    if routing_info and routing_info.get('model'):
-                        chosen_model_name = routing_info.get('model')
-                        logger.info(f"[{request_id}] Auto routed to model: {chosen_model_name} (intent={routing_info.get('intent')}, confidence={routing_info.get('confidence')})")
-                    else:
-                        logger.warning(f"[{request_id}] Router did not return a model, falling back to default_model")
-                        chosen_model_name = config_manager.get_default_model() or request.model
-                except Exception as e:
-                    logger.error(f"[{request_id}] Auto routing failed: {e}")
-                    chosen_model_name = config_manager.get_default_model() or request.model
-
-            # 檢查模型是否存在和啟用（use chosen_model_name when auto was used）
-            model_config = config_manager.get_model_by_name(chosen_model_name)
-            if not model_config:
-                logger.error(f"[{request_id}] 模型不存在: {chosen_model_name}")
-                raise HTTPException(status_code=404, detail=f"Model '{chosen_model_name}' not found")
-            
-            if not model_config.get('enabled', False):
-                logger.error(f"[{request_id}] 模型未啟用: {chosen_model_name}")
-                raise HTTPException(status_code=400, detail=f"Model '{chosen_model_name}' is disabled")
-            
-            logger.info(f"[{request_id}] 使用 Semantic Kernel 處理聊天請求 - 模型: {chosen_model_name}, 訊息數: {len(request.messages)}")
-            
-            # 記錄前端 features 設定
+            # Log feature settings for debugging
             if request.features:
-                # 手動檢查啟用的功能
-                enabled_features = []
-                if request.features.web_search:
-                    enabled_features.append("web_search")
-                if request.features.image_generation:
-                    enabled_features.append("image_generation")
-                if request.features.code_interpreter:
-                    enabled_features.append("code_interpreter")
-                
-                logger.info(f"[{request_id}] 前端啟用功能: {enabled_features if enabled_features else '無'}")
-                
-                # 記錄各個功能的狀態
-                logger.info(f"[{request_id}] Features 詳情: web_search={request.features.web_search}, image_generation={request.features.image_generation}, code_interpreter={request.features.code_interpreter}")
+                enabled_features = [
+                    name for name, enabled in [
+                        ("web_search", request.features.web_search),
+                        ("image_generation", request.features.image_generation), 
+                        ("code_interpreter", request.features.code_interpreter)
+                    ] if enabled
+                ]
+                logger.info(f"[{request_id}] Frontend features: {enabled_features or 'none'}")
             else:
-                logger.info(f"[{request_id}] 前端未指定功能，使用基本聊天模式")
+                logger.info(f"[{request_id}] No frontend features specified, using basic chat mode")
             
-            # 使用 ModelExecutor 來呼叫模型（統一 provider 行為與 usage 格式）
+            # Use ModelExecutor with built-in auto routing
             executor = get_default_executor()
             exec_result = await executor.generate(
-                model_name=chosen_model_name,
+                model_name=request.model,  # Pass 'auto' directly to executor
                 messages=request.messages,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 features=request.features
             )
 
-            # 把 executor 的回傳轉換為 ChatCompletionResponse
-            # exec_result shape: {'id','created','model','choices':[{'index','message':{'role','content'},'finish_reason'}],'usage', 'text', 'meta'}
+            # Convert ModelExecutor result to ChatCompletionResponse
+            actual_model = exec_result.get('model', request.model)
+            routing_meta = exec_result.get('meta', {}).get('routing_info', {})
+            
             choice = ChatCompletionChoice(
                 index=0,
-                message=ChatMessage(role='assistant', content=exec_result['choices'][0]['message']['content']),
+                message=ChatMessage(
+                    role='assistant', 
+                    content=exec_result['choices'][0]['message']['content']
+                ),
                 finish_reason=exec_result['choices'][0].get('finish_reason', 'stop')
             )
 
@@ -765,32 +724,33 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
             )
 
             response = ChatCompletionResponse(
-                id=exec_result.get('id', f'chatcmpl-{int(time.time())}'),
+                id=f"{request_id}-{exec_result.get('id', int(time.time()))}",
                 created=exec_result.get('created', int(time.time())),
-                model=exec_result.get('model', chosen_model_name),
+                model=actual_model,
                 choices=[choice],
                 usage=usage_obj
             )
-            
 
-            # === 企業級 Token Usage Tracking ===
+            # Enterprise-grade token usage tracking
             await track_token_usage(
                 request_id=request_id,
-                model_name=chosen_model_name,
+                model_name=actual_model,
                 usage=response.usage,
                 start_time=start_time,
                 status="success",
                 messages=request.messages,
-                response_text=str(response.choices[0].message.content) if response and getattr(response, 'choices', None) else str(response)
+                response_text=response.choices[0].message.content
             )
             
-            logger.info(f"[{request_id}] Semantic Kernel 聊天完成成功 - 模型: {chosen_model_name}")
+            # Log routing information for enterprise observability
+            if routing_meta:
+                logger.info(f"[{request_id}] Auto-routing: {actual_model} "
+                           f"(intent={routing_meta.get('intent')}, "
+                           f"confidence={routing_meta.get('confidence'):.3f})")
             
-            # 將 request_id 加入回應 header 方便追蹤
-            response.id = request_id
-            # attach routing meta to logs; we don't modify response schema, but include routing in logs
-            if routing_info:
-                logger.info(f"[{request_id}] Routing info: {routing_info}")
+            logger.info(f"[{request_id}] Chat completion successful - Model: {actual_model}, "
+                       f"Tokens: {usage_obj.total_tokens}, "
+                       f"Latency: {exec_result.get('meta', {}).get('latency_ms', 0)}ms")
             
             return response
         
