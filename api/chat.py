@@ -107,8 +107,7 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionChoice]
     usage: ChatCompletionUsage
 
-# Deprecated: SemanticKernelService replaced by unified ModelExecutor
-# All kernel management now handled by ModelExecutor for consistency
+# All kernel management now handled by unified ModelExecutor for consistency
     
     async def _load_plugins(self, kernel: sk.Kernel, model_name: str, features: Optional[Features] = None) -> int:
         """在這個架構中，Plugin 由 Agent 協調器管理，此方法主要用於基本聊天模式"""
@@ -129,272 +128,270 @@ class ChatCompletionResponse(BaseModel):
         except Exception as e:
             logger.error(f"❌ [{model_name}] Plugin loading check failed: {e}")
             return 0
-    
-    def _log_plugin_status(self, kernel: sk.Kernel, model_name: str):
-        """記錄 plugin 狀態"""
-        try:
-            plugins = list(kernel.plugins)
-            if plugins:
-                logger.info(f"🔌 [{model_name}] Loaded Plugins:")
-                for plugin in plugins:
-                    try:
-                        # 安全地獲取 plugin 資訊
-                        plugin_name = getattr(plugin, 'name', str(plugin))
-                        
-                        # 嘗試獲取 functions 資訊
-                        functions = []
-                        if hasattr(plugin, 'functions'):
-                            if hasattr(plugin.functions, 'values'):
-                                functions = [f.name for f in plugin.functions.values() if hasattr(f, 'name')]
-                            elif hasattr(plugin.functions, 'keys'):
-                                functions = list(plugin.functions.keys())
-                        elif hasattr(plugin, '_functions'):
-                            functions = list(plugin._functions.keys()) if plugin._functions else []
-                        
-                        logger.info(f"  - {plugin_name}: {functions if functions else 'no functions found'}")
-                    except Exception as e:
-                        logger.warning(f"  - {plugin}: error getting functions - {e}")
-            else:
-                logger.info(f"🔌 [{model_name}] No plugins loaded - Basic chat mode")
-        except Exception as e:
-            logger.error(f"❌ [{model_name}] Error logging plugin status: {e}")
-    
-    def _analyze_response_metadata(self, response, model_name: str) -> dict:
-        """分析回應中的 metadata，檢查函數調用等資訊"""
-        metadata = {
-            "functions_called": [],
-            "agent_used": False,
-            "response_length": len(str(response[0].content)) if response else 0
-        }
-        
-        try:
-            # 檢查是否有 metadata
-            if response and len(response) > 0 and hasattr(response[0], 'metadata') and response[0].metadata:
-                function_calls = response[0].metadata.get('function_calls', [])
-                if function_calls:
-                    metadata["functions_called"] = [fc.get('name', 'unknown') for fc in function_calls if isinstance(fc, dict)]
-                    metadata["agent_used"] = True
-                    logger.info(f"🎯 [{model_name}] Functions called: {metadata['functions_called']}")
-                else:
-                    logger.info(f"💭 [{model_name}] No functions called - direct response")
-            else:
-                logger.debug(f"📄 [{model_name}] No metadata in response")
-                
-        except Exception as e:
-            logger.warning(f"⚠️  [{model_name}] Error analyzing response metadata: {e}")
-        
-        return metadata
-    
-    async def get_kernel_for_model(self, model_name: str, features: Optional[Features] = None) -> sk.Kernel:
-        """取得指定模型的 Semantic Kernel 實例，根據 features 動態載入 plugins"""
-        # 創建基礎 kernel（不包含 plugins）
-        kernel = await self._get_base_kernel_for_model(model_name)
-        
-        # 根據 features 動態載入 plugins
-        if features:
-            plugins_count = await self._load_plugins(kernel, model_name, features)
-            logger.info(f"🔌 [{model_name}] Loaded {plugins_count} plugins based on frontend features")
-            # 記錄 plugin 狀態
-            self._log_plugin_status(kernel, model_name)
+
+def _log_plugin_status(self, kernel: sk.Kernel, model_name: str):
+    """記錄 plugin 狀態"""
+    try:
+        plugins = list(kernel.plugins)
+        if plugins:
+            logger.info(f"🔌 [{model_name}] Loaded Plugins:")
+            for plugin in plugins:
+                try:
+                    # 安全地獲取 plugin 資訊
+                    plugin_name = getattr(plugin, 'name', str(plugin))
+                    
+                    # 嘗試獲取 functions 資訊
+                    functions = []
+                    if hasattr(plugin, 'functions'):
+                        if hasattr(plugin.functions, 'values'):
+                            functions = [f.name for f in plugin.functions.values() if hasattr(f, 'name')]
+                        elif hasattr(plugin.functions, 'keys'):
+                            functions = list(plugin.functions.keys())
+                    elif hasattr(plugin, '_functions'):
+                        functions = list(plugin._functions.keys()) if plugin._functions else []
+                    
+                    logger.info(f"  - {plugin_name}: {functions if functions else 'no functions found'}")
+                except Exception as e:
+                    logger.warning(f"  - {plugin}: error getting functions - {e}")
         else:
-            logger.info(f"🔌 [{model_name}] No features specified, basic chat mode only")
+            logger.info(f"🔌 [{model_name}] No plugins loaded - Basic chat mode")
+    except Exception as e:
+        logger.error(f"❌ [{model_name}] Error logging plugin status: {e}")
+
+def _analyze_response_metadata(self, response, model_name: str) -> dict:
+    """分析回應中的 metadata，檢查函數調用等資訊"""
+    metadata = {
+        "functions_called": [],
+        "agent_used": False,
+        "response_length": len(str(response[0].content)) if response else 0
+    }
+    
+    try:
+        # 檢查是否有 metadata
+        if response and len(response) > 0 and hasattr(response[0], 'metadata') and response[0].metadata:
+            function_calls = response[0].metadata.get('function_calls', [])
+            if function_calls:
+                metadata["functions_called"] = [fc.get('name', 'unknown') for fc in function_calls if isinstance(fc, dict)]
+                metadata["agent_used"] = True
+                logger.info(f"🎯 [{model_name}] Functions called: {metadata['functions_called']}")
+            else:
+                logger.info(f"💭 [{model_name}] No functions called - direct response")
+        else:
+            logger.debug(f"📄 [{model_name}] No metadata in response")
             
-        return kernel
+    except Exception as e:
+        logger.warning(f"⚠️  [{model_name}] Error analyzing response metadata: {e}")
     
-    async def _get_base_kernel_for_model(self, model_name: str) -> sk.Kernel:
-        """取得指定模型的基礎 Semantic Kernel 實例（不包含 plugins）"""
-        # 基礎 kernel 可以快取，因為它不包含 plugins
-        cache_key = f"base_{model_name}"
-        if cache_key in self.kernels:
-            # 返回基礎 kernel 的副本，避免污染快取
-            base_kernel = self.kernels[cache_key]
-            # 創建新的 kernel 實例，但使用相同的服務配置
-            new_kernel = sk.Kernel()
-            # 複製服務
-            for service in base_kernel.services.values():
-                new_kernel.add_service(service)
-            return new_kernel
+    return metadata
 
-        # 創建新的 kernel
-        kernel = sk.Kernel()
-        model_config = config_manager.get_model_by_name(model_name)
-
-        if not model_config:
-            raise ValueError(f"Model '{model_name}' not found in configuration")
-
-        provider = model_config.get('provider')
-
-        # Azure OpenAI
-        if provider == 'azure_openai':
-            service_id = f"azure_openai_{model_name}"
-            kernel.add_service(
-                AzureChatCompletion(
-                    service_id=service_id,
-                    deployment_name=model_config.get('deployment_name'),
-                    endpoint=model_config.get('endpoint'),
-                    api_key=model_config.get('api_key'),
-                    api_version=model_config.get('api_version')
-                )
-            )
-
-        # Azure AI Foundry (may use model_id instead of deployment_name)
-        elif provider == 'azure_ai_foundry':
-            service_id = f"azure_ai_foundry_{model_name}"
-            kernel.add_service(
-                AzureChatCompletion(
-                    service_id=service_id,
-                    deployment_name=model_config.get('model_id') or model_config.get('deployment_name'),
-                    endpoint=model_config.get('endpoint'),
-                    api_key=model_config.get('api_key'),
-                    api_version=model_config.get('api_version')
-                )
-            )
-
-        # OpenAI (official)
-        elif provider == 'openai':
-            service_id = f"openai_{model_name}"
-            kernel.add_service(
-                OpenAIChatCompletion(
-                    service_id=service_id,
-                    ai_model_id=model_name,
-                    api_key=model_config.get('api_key'),
-                    base_url=model_config.get('endpoint')
-                )
-            )
-
-        else:
-            raise ValueError(f"Unsupported provider: {provider}")
+async def get_kernel_for_model(self, model_name: str, features: Optional[Features] = None) -> sk.Kernel:
+    """取得指定模型的 Semantic Kernel 實例，根據 features 動態載入 plugins"""
+    # 創建基礎 kernel（不包含 plugins）
+    kernel = await self._get_base_kernel_for_model(model_name)
+    
+    # 根據 features 動態載入 plugins
+    if features:
+        plugins_count = await self._load_plugins(kernel, model_name, features)
+        logger.info(f"🔌 [{model_name}] Loaded {plugins_count} plugins based on frontend features")
+        # 記錄 plugin 狀態
+        self._log_plugin_status(kernel, model_name)
+    else:
+        logger.info(f"🔌 [{model_name}] No features specified, basic chat mode only")
         
-        # 快取基礎 kernel
-        self.kernels[cache_key] = kernel
-        
-        # 返回副本
+    return kernel
+
+async def _get_base_kernel_for_model(self, model_name: str) -> sk.Kernel:
+    """取得指定模型的基礎 Semantic Kernel 實例（不包含 plugins）"""
+    # 基礎 kernel 可以快取，因為它不包含 plugins
+    cache_key = f"base_{model_name}"
+    if cache_key in self.kernels:
+        # 返回基礎 kernel 的副本，避免污染快取
+        base_kernel = self.kernels[cache_key]
+        # 創建新的 kernel 實例，但使用相同的服務配置
         new_kernel = sk.Kernel()
-        for service in kernel.services.values():
+        # 複製服務
+        for service in base_kernel.services.values():
             new_kernel.add_service(service)
         return new_kernel
-    
-    async def create_chat_completion(self, model_name: str, messages: List[ChatMessage], 
-                                   temperature: float = 0.7, max_tokens: Optional[int] = None, 
-                                   features: Optional[Features] = None) -> ChatCompletionResponse:
-        """使用 Semantic Kernel 創建聊天完成"""
-        try:
-            kernel = await self.get_kernel_for_model(model_name, features)
-            model_config = config_manager.get_model_by_name(model_name)
-            
-            # 取得聊天完成服務
-            chat_completion = kernel.get_service(type=ChatCompletionClientBase)
-            
-            # 創建聊天歷史
-            chat_history = ChatHistory()
-                      
-            # 添加訊息到聊天歷史
-            for message in messages:
-                if message.role == "system":
-                    chat_history.add_system_message(message.content)
-                else:
-                    chat_history.add_message(
-                        ChatMessageContent(role=message.role, content=message.content)
-                    )
-            
-            # 準備請求設定
-            execution_settings = kernel.get_prompt_execution_settings_from_service_id(
-                service_id=chat_completion.service_id
-            )
-            
-            # 動態設定參數 - 不寫死任何模型設定
-            provider = model_config.get('provider')
-            
-            # Azure OpenAI 統一不設定 temperature 避免參數衝突
-            if provider != 'azure_openai':
-                try:
-                    execution_settings.temperature = temperature
-                except Exception as e:
-                    logger.warning(f"無法設定 temperature: {e}")
-            
-            # 動態處理 max_tokens vs max_completion_tokens
-            max_tokens_value = max_tokens or model_config.get('max_completion_tokens') or model_config.get('max_tokens', 4096)
-            
-            # 先嘗試 max_completion_tokens，如果失敗再嘗試 max_tokens
-            token_set = False
-            if model_config.get('max_completion_tokens'):
-                try:
-                    execution_settings.max_completion_tokens = max_tokens_value
-                    token_set = True
-                    logger.info(f"使用 max_completion_tokens: {max_tokens_value}")
-                except Exception as e:
-                    logger.warning(f"無法設定 max_completion_tokens: {e}")
-            
-            # 啟用函數調用（工具選擇）- 條件性啟用
-            plugins_available = len(list(kernel.plugins)) > 0
-            if plugins_available and hasattr(execution_settings, 'function_choice_behavior'):
-                # 重新啟用函數調用，但先記錄詳細資訊
-                execution_settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
-                logger.info(f"🤖 [{model_name}] Agent mode enabled with {len(list(kernel.plugins))} plugins")
-                
-                # 記錄可用的函數
-                for plugin in kernel.plugins:
-                    plugin_name = getattr(plugin, 'name', str(plugin))
-                    logger.info(f"🔧 [{model_name}] Plugin '{plugin_name}' available for function calls")
-                    
-            elif hasattr(execution_settings, 'function_choice_behavior'):
-                logger.info(f"💬 [{model_name}] Basic chat mode (no plugins available)")
-            else:
-                logger.warning(f"⚠️  [{model_name}] FunctionChoiceBehavior not supported by this execution settings type")
-            
-            # 執行聊天完成
-            # 如果啟用了函數調用，需要傳遞 kernel 實例
-            if plugins_available and hasattr(execution_settings, 'function_choice_behavior') and execution_settings.function_choice_behavior:
-                response = await chat_completion.get_chat_message_contents(
-                    chat_history=chat_history,
-                    settings=execution_settings,
-                    kernel=kernel
-                )
-            else:
-                response = await chat_completion.get_chat_message_contents(
-                    chat_history=chat_history,
-                    settings=execution_settings
-                )
-            
-            
-            if not response:
-                raise ValueError("No response from chat completion service")
-            
-            # 檢查是否有函數調用發生
-            response_metadata = self._analyze_response_metadata(response, model_name)
-            
-            # 轉換為 OpenAI 兼容格式
-            choice = ChatCompletionChoice(
-                index=0,
-                message=ChatMessage(role="assistant", content=str(response[0].content)),
-                finish_reason="stop"
-            )
-            
-            # 估算 token 使用量（Semantic Kernel 可能不提供詳細統計）
-            prompt_tokens = sum(len(msg.content.split()) for msg in messages)
-            completion_tokens = len(str(response[0].content).split())
-            
-            usage = ChatCompletionUsage(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens
-            )
-            
-            return ChatCompletionResponse(
-                id=f"chatcmpl-{int(time.time())}",
-                created=int(time.time()),
-                model=model_name,
-                choices=[choice],
-                usage=usage
-            )
-            
-        except Exception as e:
-            logger.error(f"Semantic Kernel 聊天完成失敗: {e}")
-            raise
-    
 
-# 全域服務實例
-sk_service = SemanticKernelService()
+    # 創建新的 kernel
+    kernel = sk.Kernel()
+    model_config = config_manager.get_model_by_name(model_name)
+
+    if not model_config:
+        raise ValueError(f"Model '{model_name}' not found in configuration")
+
+    provider = model_config.get('provider')
+
+    # Azure OpenAI
+    if provider == 'azure_openai':
+        service_id = f"azure_openai_{model_name}"
+        kernel.add_service(
+            AzureChatCompletion(
+                service_id=service_id,
+                deployment_name=model_config.get('deployment_name'),
+                endpoint=model_config.get('endpoint'),
+                api_key=model_config.get('api_key'),
+                api_version=model_config.get('api_version')
+            )
+        )
+
+    # Azure AI Foundry (may use model_id instead of deployment_name)
+    elif provider == 'azure_ai_foundry':
+        service_id = f"azure_ai_foundry_{model_name}"
+        kernel.add_service(
+            AzureChatCompletion(
+                service_id=service_id,
+                deployment_name=model_config.get('model_id') or model_config.get('deployment_name'),
+                endpoint=model_config.get('endpoint'),
+                api_key=model_config.get('api_key'),
+                api_version=model_config.get('api_version')
+            )
+        )
+
+    # OpenAI (official)
+    elif provider == 'openai':
+        service_id = f"openai_{model_name}"
+        kernel.add_service(
+            OpenAIChatCompletion(
+                service_id=service_id,
+                ai_model_id=model_name,
+                api_key=model_config.get('api_key'),
+                base_url=model_config.get('endpoint')
+            )
+        )
+
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
+    
+    # 快取基礎 kernel
+    self.kernels[cache_key] = kernel
+    
+    # 返回副本
+    new_kernel = sk.Kernel()
+    for service in kernel.services.values():
+        new_kernel.add_service(service)
+    return new_kernel
+
+async def create_chat_completion(self, model_name: str, messages: List[ChatMessage], 
+                                temperature: float = 0.7, max_tokens: Optional[int] = None, 
+                                features: Optional[Features] = None) -> ChatCompletionResponse:
+    """使用 Semantic Kernel 創建聊天完成"""
+    try:
+        kernel = await self.get_kernel_for_model(model_name, features)
+        model_config = config_manager.get_model_by_name(model_name)
+        
+        # 取得聊天完成服務
+        chat_completion = kernel.get_service(type=ChatCompletionClientBase)
+        
+        # 創建聊天歷史
+        chat_history = ChatHistory()
+                    
+        # 添加訊息到聊天歷史
+        for message in messages:
+            if message.role == "system":
+                chat_history.add_system_message(message.content)
+            else:
+                chat_history.add_message(
+                    ChatMessageContent(role=message.role, content=message.content)
+                )
+        
+        # 準備請求設定
+        execution_settings = kernel.get_prompt_execution_settings_from_service_id(
+            service_id=chat_completion.service_id
+        )
+        
+        # 動態設定參數 - 不寫死任何模型設定
+        provider = model_config.get('provider')
+        
+        # Azure OpenAI 統一不設定 temperature 避免參數衝突
+        if provider != 'azure_openai':
+            try:
+                execution_settings.temperature = temperature
+            except Exception as e:
+                logger.warning(f"無法設定 temperature: {e}")
+        
+        # 動態處理 max_tokens vs max_completion_tokens
+        max_tokens_value = max_tokens or model_config.get('max_completion_tokens') or model_config.get('max_tokens', 4096)
+        
+        # 先嘗試 max_completion_tokens，如果失敗再嘗試 max_tokens
+        token_set = False
+        if model_config.get('max_completion_tokens'):
+            try:
+                execution_settings.max_completion_tokens = max_tokens_value
+                token_set = True
+                logger.info(f"使用 max_completion_tokens: {max_tokens_value}")
+            except Exception as e:
+                logger.warning(f"無法設定 max_completion_tokens: {e}")
+        
+        # 啟用函數調用（工具選擇）- 條件性啟用
+        plugins_available = len(list(kernel.plugins)) > 0
+        if plugins_available and hasattr(execution_settings, 'function_choice_behavior'):
+            # 重新啟用函數調用，但先記錄詳細資訊
+            execution_settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
+            logger.info(f"🤖 [{model_name}] Agent mode enabled with {len(list(kernel.plugins))} plugins")
+            
+            # 記錄可用的函數
+            for plugin in kernel.plugins:
+                plugin_name = getattr(plugin, 'name', str(plugin))
+                logger.info(f"🔧 [{model_name}] Plugin '{plugin_name}' available for function calls")
+                
+        elif hasattr(execution_settings, 'function_choice_behavior'):
+            logger.info(f"💬 [{model_name}] Basic chat mode (no plugins available)")
+        else:
+            logger.warning(f"⚠️  [{model_name}] FunctionChoiceBehavior not supported by this execution settings type")
+        
+        # 執行聊天完成
+        # 如果啟用了函數調用，需要傳遞 kernel 實例
+        if plugins_available and hasattr(execution_settings, 'function_choice_behavior') and execution_settings.function_choice_behavior:
+            response = await chat_completion.get_chat_message_contents(
+                chat_history=chat_history,
+                settings=execution_settings,
+                kernel=kernel
+            )
+        else:
+            response = await chat_completion.get_chat_message_contents(
+                chat_history=chat_history,
+                settings=execution_settings
+            )
+        
+        
+        if not response:
+            raise ValueError("No response from chat completion service")
+        
+        # 檢查是否有函數調用發生
+        response_metadata = self._analyze_response_metadata(response, model_name)
+        
+        # 轉換為 OpenAI 兼容格式
+        choice = ChatCompletionChoice(
+            index=0,
+            message=ChatMessage(role="assistant", content=str(response[0].content)),
+            finish_reason="stop"
+        )
+        
+        # 估算 token 使用量（Semantic Kernel 可能不提供詳細統計）
+        prompt_tokens = sum(len(msg.content.split()) for msg in messages)
+        completion_tokens = len(str(response[0].content).split())
+        
+        usage = ChatCompletionUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens
+        )
+        
+        return ChatCompletionResponse(
+            id=f"chatcmpl-{int(time.time())}",
+            created=int(time.time()),
+            model=model_name,
+            choices=[choice],
+            usage=usage
+        )
+        
+    except Exception as e:
+        logger.error(f"Semantic Kernel 聊天完成失敗: {e}")
+        raise
+
+
 # Event-driven: use in-process event bus to publish TokenUsage events
 from logger_service.event_bus import event_bus as global_event_bus
 
