@@ -10,6 +10,7 @@ from semantic_kernel.connectors.ai.chat_completion_client_base import ChatComple
 
 logger = logging.getLogger(__name__)
 
+
 class ThinkerAgent:
     """
     Thinker Agent - 主控思考者
