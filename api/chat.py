@@ -864,47 +864,47 @@ async def reload_plugin_config():
         logger.error(f"重新載入 Plugin 配置失敗: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reload plugin config: {str(e)}")
 
-@router.get("/api/chat/agent/status")
-async def get_agent_status():
-    """獲取 Agent 模式狀態"""
-    try:
-        # 創建一個測試用的聊天服務來檢查 Agent 可用性
-        test_model = config_manager.get_default_model()
-        if not test_model:
-            available_models = config_manager.get_available_models()
-            if available_models:
-                test_model = available_models[0]['name']
-            else:
-                raise ValueError("No models available")
+# @router.get("/api/chat/agent/status")
+# async def get_agent_status():
+#     """獲取 Agent 模式狀態"""
+#     try:
+#         # 創建一個測試用的聊天服務來檢查 Agent 可用性
+#         test_model = config_manager.get_default_model()
+#         if not test_model:
+#             available_models = config_manager.get_available_models()
+#             if available_models:
+#                 test_model = available_models[0]['name']
+#             else:
+#                 raise ValueError("No models available")
         
-        model_config = config_manager.get_model_by_name(test_model)
-        if not model_config:
-            raise ValueError(f"Model config not found for {test_model}")
+#         model_config = config_manager.get_model_by_name(test_model)
+#         if not model_config:
+#             raise ValueError(f"Model config not found for {test_model}")
         
-        chat_service = await create_chat_service_for_model(test_model, model_config)
-        orchestrator = AgentOrchestrator(chat_service)
+#         chat_service = await create_chat_service_for_model(test_model, model_config)
+#         orchestrator = AgentOrchestrator(chat_service)
         
-        available_features = orchestrator.get_available_features()
+#         available_features = orchestrator.get_available_features()
         
-        return {
-            "status": "available",
-            "agent_mode": "enabled",
-            "available_features": available_features,
-            "agents": {
-                "ThinkerAgent": "available",
-                "WebSearchAgent": "available" if "web_search" in available_features else "unavailable"
-            },
-            "timestamp": datetime.now().isoformat()
-        }
+#         return {
+#             "status": "available",
+#             "agent_mode": "enabled",
+#             "available_features": available_features,
+#             "agents": {
+#                 "ThinkerAgent": "available",
+#                 "WebSearchAgent": "available" if "web_search" in available_features else "unavailable"
+#             },
+#             "timestamp": datetime.now().isoformat()
+#         }
         
-    except Exception as e:
-        logger.error(f"獲取 Agent 狀態失敗: {e}")
-        return {
-            "status": "error",
-            "agent_mode": "disabled",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+#     except Exception as e:
+#         logger.error(f"獲取 Agent 狀態失敗: {e}")
+#         return {
+#             "status": "error",
+#             "agent_mode": "disabled",
+#             "error": str(e),
+#             "timestamp": datetime.now().isoformat()
+#         }
 
 @router.get("/api/chat/features")
 async def get_available_features():
