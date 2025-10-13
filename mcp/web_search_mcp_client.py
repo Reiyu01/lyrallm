@@ -63,7 +63,10 @@ class WebSearchMCPClient:
         self._plugin_context = None
 
     async def start(self) -> None:
-        """啟動 MCP 客戶端連線"""
+        """
+        流程編號 #021: MCP客戶端啟動 - 建立與MCP服務器的連接
+        啟動 MCP 客戶端連線
+        """
         if not mcp_available or MCPStdioPlugin is None:
             raise RuntimeError("SK MCP 連接器未安裝")
         
@@ -79,6 +82,7 @@ class WebSearchMCPClient:
             # 建立 Kernel
             self._kernel = Kernel()
             
+            # 流程編號 #022: MCP插件配置 - 配置MCPStdioPlugin連接參數
             # 使用官方推薦的 async with 方式
             self._plugin_context = MCPStdioPlugin(
                 name="WebSearchMCP",
@@ -132,6 +136,9 @@ class WebSearchMCPClient:
                 self._kernel = None
 
     async def _invoke_tool(self, name: str, args: Dict[str, Any] | None = None) -> str:
+        """
+        流程編號 #023: MCP工具調用 - 通過SK Kernel執行MCP工具
+        """
         args = args or {}
         if not self._kernel or not self._mcp_plugin:
             raise RuntimeError("MCP client 尚未啟動，請先呼叫 start()")
@@ -139,6 +146,7 @@ class WebSearchMCPClient:
         try:
             logger.info(f"呼叫 MCP 工具: tool='{name}' args={args}")
             
+            # 流程編號 #024: Kernel工具執行 - 使用Semantic Kernel執行函式
             # 使用 Kernel 執行 MCP 工具
             from semantic_kernel.functions.kernel_arguments import KernelArguments
             kernel_args = KernelArguments(**args)
@@ -150,6 +158,7 @@ class WebSearchMCPClient:
                 arguments=kernel_args
             )
             
+            # 流程編號 #025: 結果處理 - 處理和格式化工具執行結果
             # 處理結果
             if hasattr(result, 'value'):
                 result_str = str(result.value)
@@ -171,13 +180,17 @@ class WebSearchMCPClient:
             return json.dumps({"error": str(e)}, ensure_ascii=False)
 
     async def search(self, query: str, max_results: int = 5) -> str:
+        """流程編號 #026A: 搜尋工具調用 - 執行網路搜尋"""
         return await self._invoke_tool("search", {"query": query, "max_results": max_results})
 
     async def web_fetch(self, url: str) -> str:
+        """流程編號 #026B: 網頁抓取工具調用 - 抓取指定網頁內容"""
         return await self._invoke_tool("web_fetch", {"url": url})
 
     async def get_search_status(self) -> str:
+        """流程編號 #026C: 狀態查詢工具調用 - 檢查搜尋服務狀態"""
         return await self._invoke_tool("get_search_status")
 
     async def get_current_time(self, format: str = "iso") -> str:
+        """流程編號 #026D: 時間工具調用 - 獲取當前時間"""
         return await self._invoke_tool("get_current_time", {"format": format})

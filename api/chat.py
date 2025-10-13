@@ -473,6 +473,7 @@ def get_queue_status():
 
 async def handle_agent_mode_request(request: ChatCompletionRequest) -> ChatCompletionResponse:
     """
+    流程編號 #004: Agent模式處理入口 - 初始化Agent協調器
     處理 Agent 模式請求 - 使用多 Agent 協作
     """
     request_id = f"agent_{uuid.uuid4().hex[:12]}"
@@ -495,12 +496,14 @@ async def handle_agent_mode_request(request: ChatCompletionRequest) -> ChatCompl
         
         chat_service = await create_chat_service_for_model(request.model, model_config)
         
+        # 流程編號 #005: 創建Agent協調器
         # 創建 Agent 協調器 (使用使用者選擇的模型)
         orchestrator = await create_practical_agent_orchestrator(chat_service)
         
         if not orchestrator:
             raise ValueError("無法初始化 Agent 協調器")
         
+        # 流程編號 #006: 動態能力註冊 - 根據features啟用相應功能
         # 根據 features 動態添加能力
         capabilities_added = []
         if request.features:
@@ -531,9 +534,11 @@ async def handle_agent_mode_request(request: ChatCompletionRequest) -> ChatCompl
                 
             logger.info(f"[{request_id}] Agent 模式啟用功能: {list(features_dict.keys())}")
         
+        # 流程編號 #007: 處理用戶請求 - 調用Agent協調器
         # 處理請求
         result = await orchestrator.process_request(user_input, features_dict)
         
+        # 流程編號 #050: 格式轉換 - 將Agent結果轉為OpenAI格式
         # 轉換為 OpenAI 兼容格式
         choice = ChatCompletionChoice(
             index=0,
@@ -605,6 +610,8 @@ async def create_chat_service_for_model(model_name: str, model_config: Dict[str,
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
+# 流程編號 #001: API請求入口點 - 接收聊天完成請求
+# 此處是整個聊天流程的起點，所有的對話請求都會經過這裡
 @router.post("/api/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
     """
@@ -630,7 +637,8 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         if request.features:
             logger.info(f"[{request_id}] Features 內容: web_search={request.features.web_search}, image_generation={request.features.image_generation}, code_interpreter={request.features.code_interpreter}")
         
-        # 檢查是否啟用 Agent 模式
+        # 流程編號 #002: 模式決策點 - 判斷使用Agent模式或直接模式
+        # 根據前端傳來的features參數決定處理方式
         agent_mode_enabled = False
         if request.features:
             # 檢查是否有任何功能啟用
@@ -651,7 +659,8 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         else:
             logger.info(f"[{request_id}] 前端未指定功能，使用基本聊天模式")
         
-        # Agent 模式處理
+        # 流程編號 #003A: Agent模式分支 - 進入多Agent協作流程
+        # 當啟用任何特殊功能時走此分支
         if agent_mode_enabled:
             try:
                 response = await handle_agent_mode_request(request)
@@ -674,6 +683,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
                 # 降級到傳統模式
                 agent_mode_enabled = False
         
+        # 流程編號 #003B: 直接模式分支 - 使用基本聊天功能（不啟用特殊功能時）
         # Standard model processing (optimized with new ModelExecutor)
         if not agent_mode_enabled:
             logger.info(f"[{request_id}] Processing with standard model execution")

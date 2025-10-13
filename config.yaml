@@ -14,35 +14,44 @@ models:
     strategy: "hybrid"  # hybrid | vector_only | rule_only | slm_only
     config_file: "routing_rules.yaml"
     
-    # 路由器配置
-    routers:
-      # 小模型分析器
+    # 🤝 階段1: Vector+SLM 聯合意圖分析
+    intent_analysis:
+      enabled: true
+      mode: "parallel"  # parallel | progressive
+      
+      # Vector 分析器 (複用現有 SemanticRouter)
+      vector:
+        enabled: true
+        provider: "elasticsearch"  # 使用現有實現
+        similarity_threshold: 0.7
+        top_k: 5
+        weight: 0.4  # 在聯合分析中的權重
+        
+      # SLM 分析器  
       small_model:
         enabled: true
         provider: "huggingface"  # huggingface | ollama | openai
         model: "distilbert-base-uncased"
         confidence_threshold: 0.8
         max_inference_time: 100  # ms
+        weight: 0.6  # 在聯合分析中的權重
         
-      # 向量路由器  
-      vector:
-        enabled: true
-        provider: "easy_embedding"  # easy_embedding | elasticsearch | qdrant
-        embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
-        similarity_threshold: 0.7
-        top_k: 5
+      # 融合策略配置
+      fusion:
+        consensus_bonus: 0.2      # 意圖一致時的置信度加成
+        conflict_penalty: 0.1     # 意圖衝突時的置信度懲罰
+        uncertainty_threshold: 0.5 # 不確定性閾值
+        fast_path_threshold: 0.9   # Vector 快速通道閾值
         
-      # 規則引擎
-      rule_based:
-        enabled: true
-        config_file: "routing_rules.yaml"
-        priority_weight: 0.3
-        
-    # 決策權重配置
-    decision_weights:
-      small_model_confidence: 0.6    # SLM 置信度權重
-      rule_match_score: 0.3          # 規則匹配分數權重
-      vector_similarity: 0.1         # 向量相似度權重
+    # 📋 階段2: 規則引擎決策
+    rule_engine:
+      enabled: true
+      config_file: "routing_rules.yaml"
+      
+    # 最終決策權重 (意圖分析 → 規則決策)
+    decision_flow:
+      intent_confidence_weight: 0.7   # 意圖分析結果權重
+      rule_match_weight: 0.3          # 規則匹配權重
   #10/13 >
 
   available_models:

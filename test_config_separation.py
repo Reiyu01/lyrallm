@@ -21,6 +21,24 @@ def test_config_loading():
     print(f"   路由功能啟用: {config_manager.is_routing_enabled()}")
     print(f"   路由策略: {config_manager.get_routing_strategy()}")
     
+    # 測試新的意圖分析配置
+    print("\n1.1 意圖分析配置:")
+    print(f"   意圖分析啟用: {config_manager.is_intent_analysis_enabled()}")
+    print(f"   處理模式: {config_manager.get_intent_analysis_mode()}")
+    
+    vector_config = config_manager.get_vector_config()
+    slm_config = config_manager.get_slm_config()
+    print(f"   Vector 權重: {vector_config.get('weight')}")
+    print(f"   SLM 權重: {slm_config.get('weight')}")
+    
+    # 測試意圖映射
+    intent_mapping = config_manager.get_intent_mapping()
+    if intent_mapping:
+        print(f"   意圖映射類型數: {len(intent_mapping)}")
+        if 'code_generation' in intent_mapping:
+            code_mapping = intent_mapping['code_generation']
+            print(f"   程式碼生成偏好模型: {code_mapping.get('preferred_models')}")
+    
     # 測試路由規則載入
     print("\n2. 路由規則載入測試:")
     routing_rules = config_manager.get_routing_rules()

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class WebSearchAgent:
     """
+    流程編號 #040: WebSearch Agent定義 - 專業網路搜尋執行者
     WebSearch Agent - 網路搜尋專家
     
     職責：
@@ -20,6 +21,9 @@ class WebSearchAgent:
     2. 執行精準的網路搜尋
     3. 整理和篩選搜尋結果
     4. 提供結構化的搜尋報告
+    
+    注意：在MCP架構下，WebSearchAgent主要提供指令模板，
+    實際搜尋功能由MCP Server(#027-#029)執行
     """
     
     def __init__(self, chat_service: ChatCompletionClientBase):

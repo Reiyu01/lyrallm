@@ -195,6 +195,36 @@ class ConfigManager:
         """取得路由策略"""
         return self.get_routing_config().get('strategy', 'vector_only')
 
+    def get_intent_analysis_config(self) -> Dict:
+        """取得意圖分析配置"""
+        return self.get_routing_config().get('intent_analysis', {})
+
+    def is_intent_analysis_enabled(self) -> bool:
+        """檢查意圖分析是否啟用"""
+        return self.get_intent_analysis_config().get('enabled', False)
+
+    def get_intent_analysis_mode(self) -> str:
+        """取得意圖分析模式"""
+        return self.get_intent_analysis_config().get('mode', 'parallel')
+
+    def get_vector_config(self) -> Dict:
+        """取得向量分析器配置"""
+        return self.get_intent_analysis_config().get('vector', {})
+
+    def get_slm_config(self) -> Dict:
+        """取得小模型分析器配置"""
+        return self.get_intent_analysis_config().get('small_model', {})
+
+    def get_fusion_config(self) -> Dict:
+        """取得融合策略配置"""
+        return self.get_intent_analysis_config().get('fusion', {})
+
+    def get_intent_mapping(self) -> Dict:
+        """取得意圖映射配置"""
+        if not self.routing_rules:
+            return {}
+        return self.routing_rules.get('intent_mapping', {})
+
     def get_routing_rules(self) -> Optional[Dict]:
         """取得路由規則"""
         return self.routing_rules

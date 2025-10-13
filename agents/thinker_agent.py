@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class ThinkerAgent:
     """
+    流程編號 #030: Thinker Agent定義 - 主控思考協調者
     Thinker Agent - 主控思考者
     
     職責：

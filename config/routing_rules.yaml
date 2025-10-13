@@ -5,12 +5,34 @@ global:
   max_concurrent_requests: 1000
   enable_analytics: true
   fallback_model: "gpt-3.5-turbo"
+
+# 意圖分析配置 (用於規則匹配)
+intent_mapping:
+  # 意圖 → 模型專業度映射
+  code_generation:
+    preferred_models: ["gpt-4", "claude-3-sonnet"]
+    complexity_threshold: 7.0  # 高於此複雜度使用高級模型
+    
+  data_analysis:
+    preferred_models: ["gpt-4", "claude-3-sonnet"] 
+    complexity_threshold: 6.0
+    
+  text_summary:
+    preferred_models: ["gpt-3.5-turbo", "claude-3-haiku"]
+    complexity_threshold: 4.0
+    
+  qa_general:
+    preferred_models: ["gpt-3.5-turbo", "ollama-llama2"]
+    complexity_threshold: 3.0
+    
+  creative_writing:
+    preferred_models: ["claude-3-sonnet", "gpt-4"]
+    complexity_threshold: 5.0
   
-  # 權重配置
+  # 新架構權重配置
   routing_weights:
-    small_model_analysis: 0.6    # 小模型分析結果權重
-    rule_based_routing: 0.3      # 規則路由權重  
-    load_balancing: 0.1          # 負載平衡權重
+    intent_analysis_result: 0.7  # Vector+SLM 聯合意圖分析權重
+    rule_match_result: 0.3       # 規則引擎匹配權重
   
   # 成本控制
   cost_management:

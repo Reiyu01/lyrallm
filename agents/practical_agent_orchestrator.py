@@ -75,11 +75,15 @@ APPROACH: [具體處理方法]
         return prompt
     
     async def process_request(self, user_input: str, features: Dict[str, Any] = None) -> str:
-        """處理用戶請求，智能選擇處理方式"""
+        """
+        流程編號 #008: Agent協調器主處理流程入口
+        處理用戶請求，智能選擇處理方式
+        """
         try:
             # 重置對話歷史為這次請求
             self.chat_history = ChatHistory()
             
+            # 流程編號 #009: 確定活躍能力 - 根據features決定可用功能
             # 根據功能參數確定可用能力
             active_capabilities = []
             if features and features.get('web_search') and "web_search" in self.available_capabilities:
@@ -93,6 +97,7 @@ APPROACH: [具體處理方法]
                 "capabilities": active_capabilities
             })
             
+                        # 流程編號 #010A: 直接處理分支 - 沒有特殊能力時直接回答
             # 如果沒有特殊能力，直接處理
             if not active_capabilities:
                 logger.info("📝 Thinker 直接處理請求")
@@ -100,6 +105,7 @@ APPROACH: [具體處理方法]
                 self._log_response("thinker_direct", result)
                 return result
             
+            # 流程編號 #011: Thinker分析階段 - 智能分析用戶請求
             # 使用 Thinker 分析並決策
             logger.info(f"🧠 Thinker 分析請求，可用能力: {active_capabilities}")
             
@@ -113,13 +119,16 @@ APPROACH: [具體處理方法]
             
             logger.info(f"🤔 Thinker 決策: {decision_result[:150]}...")
             
+            # 流程編號 #012: 決策分支點 - 根據Thinker分析選擇處理方式
             # 根據決策選擇處理方式
             if "DECISION: WEB_SEARCH" in decision_result and "web_search" in active_capabilities:
+                # 流程編號 #013A: WebSearch分支 - 啟動網路搜尋流程
                 logger.info("🔍 使用 WebSearch 能力")
                 result = await self._use_web_search(user_input, decision_result)
                 self._log_response("web_search_agent", result)
                 return result
             else:
+                # 流程編號 #013B: 直接回答分支 - 使用現有知識回答
                 logger.info("📝 Thinker 提供直接回應")
                 result = await self._extract_or_generate_response(decision_result, user_input)
                 self._log_response("thinker_response", result)
@@ -146,8 +155,12 @@ APPROACH: [具體處理方法]
         return await self._invoke_with_prompt(prompt)
     
     async def _use_web_search(self, user_input: str, analysis: str) -> str:
-        """使用 WebSearch 能力處理請求"""
+        """
+        流程編號 #014: WebSearch處理流程入口
+        使用 WebSearch 能力處理請求
+        """
         try:
+            # 流程編號 #015: MCP客戶端初始化檢查
             # 確保 MCP 客戶端啟動
             if getattr(self, "web_search_via", None) != "mcp":
                 raise RuntimeError("WebSearch 未以 MCP 啟用")
@@ -158,10 +171,12 @@ APPROACH: [具體處理方法]
                 await self.mcp_client.start()
                 self._mcp_started = True
             
+            # 流程編號 #016: 時間獲取 - 取得當前時間優化搜尋
             # 先獲取當前時間，用於優化搜尋
             current_time_result = await self.mcp_client.get_current_time("readable")
             logger.info(f"📅 獲取當前時間: {current_time_result}")
             
+            # 流程編號 #017: 搜尋規劃 - 基於時間和分析準備搜尋關鍵詞
             # 準備搜尋查詢，包含時間資訊
             search_preparation_prompt = f"""
 基於以下分析和用戶請求，準備進行網路搜尋：
@@ -182,6 +197,7 @@ FOCUS: [重點關注的資訊類型]
             search_plan = await self._invoke_with_prompt(search_preparation_prompt)
             logger.info(f"🎯 搜尋計劃: {search_plan[:100]}...")
             
+            # 流程編號 #018: 關鍵詞提取 - 從搜尋計劃提取最佳關鍵詞
             # 從搜尋計劃中提取關鍵字
             import re
             keywords_match = re.search(r'KEYWORDS:\s*([^\n]+)', search_plan)
@@ -192,10 +208,12 @@ FOCUS: [重點關注的資訊類型]
                 search_keywords = user_input
                 logger.info(f"🔍 使用原始請求作為搜尋關鍵字: {search_keywords}")
             
+            # 流程編號 #019: MCP搜尋執行 - 調用MCP客戶端執行搜尋
             # 執行網路搜尋
             search_result_str = await self.mcp_client.search(query=search_keywords, max_results=5)
             logger.info("✅ MCP 網路搜尋完成")
             
+            # 流程編號 #020: 結果分析合成 - 分析搜尋結果並生成回答
             # 分析和總結搜尋結果
             synthesis_prompt = f"""
 基於網路搜尋結果，為用戶提供綜合性回答：
