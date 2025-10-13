@@ -35,22 +35,16 @@ class PracticalAgentOrchestrator:
         logger.info("🎭 PracticalAgentOrchestrator 初始化完成")
     
     def add_web_search_capability(self) -> bool:
-        """添加網路搜尋能力"""
+        """僅使用 MCP 方式啟用網路搜尋能力（不保留 Plugin）。"""
         try:
-            from plugins.ollama_web_search_plugin import OllamaWebSearchPlugin
-            
-            # 初始化 Web Search Plugin
-            web_search_plugin = OllamaWebSearchPlugin()
-            
-            # 將 plugin 添加到 kernel
-            self.kernel.add_plugin(web_search_plugin, plugin_name="WebSearch")
-            
+            from lyrallm.mcp.web_search_mcp_client import WebSearchMCPClient  # type: ignore
+            self.mcp_client = WebSearchMCPClient()
             self.available_capabilities.append("web_search")
-            logger.info("🔍 WebSearch 能力已添加")
+            self.web_search_via = "mcp"
+            logger.info("🔌 WebSearch 能力已啟用（MCP 模式）")
             return True
-            
-        except Exception as e:
-            logger.warning(f"⚠️ WebSearch 能力添加失敗: {e}")
+        except Exception as mcp_err:
+            logger.error(f"❌ 無法啟用 WebSearch（MCP）：{mcp_err}")
             return False
     
     @kernel_function(
@@ -154,15 +148,30 @@ APPROACH: [具體處理方法]
     async def _use_web_search(self, user_input: str, analysis: str) -> str:
         """使用 WebSearch 能力處理請求"""
         try:
-            # 準備搜尋查詢
+            # 確保 MCP 客戶端啟動
+            if getattr(self, "web_search_via", None) != "mcp":
+                raise RuntimeError("WebSearch 未以 MCP 啟用")
+            if not hasattr(self, "mcp_client"):
+                from lyrallm.mcp.web_search_mcp_client import WebSearchMCPClient  # lazy import
+                self.mcp_client = WebSearchMCPClient()
+            if not getattr(self, "_mcp_started", False):
+                await self.mcp_client.start()
+                self._mcp_started = True
+            
+            # 先獲取當前時間，用於優化搜尋
+            current_time_result = await self.mcp_client.get_current_time("readable")
+            logger.info(f"📅 獲取當前時間: {current_time_result}")
+            
+            # 準備搜尋查詢，包含時間資訊
             search_preparation_prompt = f"""
 基於以下分析和用戶請求，準備進行網路搜尋：
 
 用戶請求: {user_input}
 分析結果: {analysis}
+當前時間: {current_time_result}
 
 請提供：
-1. 最佳的搜尋關鍵字
+1. 最佳的搜尋關鍵字（如果用戶要求最新資訊，請在關鍵字中包含時間相關詞彙）
 2. 搜尋後需要重點關注的資訊
 
 格式：
@@ -173,25 +182,27 @@ FOCUS: [重點關注的資訊類型]
             search_plan = await self._invoke_with_prompt(search_preparation_prompt)
             logger.info(f"🎯 搜尋計劃: {search_plan[:100]}...")
             
+            # 從搜尋計劃中提取關鍵字
+            import re
+            keywords_match = re.search(r'KEYWORDS:\s*([^\n]+)', search_plan)
+            if keywords_match:
+                search_keywords = keywords_match.group(1).strip()
+                logger.info(f"🔍 使用搜尋關鍵字: {search_keywords}")
+            else:
+                search_keywords = user_input
+                logger.info(f"🔍 使用原始請求作為搜尋關鍵字: {search_keywords}")
+            
             # 執行網路搜尋
-            try:
-                from semantic_kernel.functions.kernel_arguments import KernelArguments
-                
-                search_args = KernelArguments(query=user_input)
-                search_result = await self.kernel.invoke(
-                    plugin_name="WebSearch",
-                    function_name="search",
-                    arguments=search_args
-                )
-                
-                logger.info("✅ 網路搜尋完成")
-                
-                # 分析和總結搜尋結果
-                synthesis_prompt = f"""
+            search_result_str = await self.mcp_client.search(query=search_keywords, max_results=5)
+            logger.info("✅ MCP 網路搜尋完成")
+            
+            # 分析和總結搜尋結果
+            synthesis_prompt = f"""
 基於網路搜尋結果，為用戶提供綜合性回答：
 
 原始請求: {user_input}
-搜尋結果: {str(search_result)}
+當前時間: {current_time_result}
+搜尋結果: {search_result_str}
 
 請提供：
 1. 清晰的總結
@@ -202,13 +213,13 @@ FOCUS: [重點關注的資訊類型]
 請確保回答結構清晰、資訊準確且對用戶有價值。
 """
                 
-                final_response = await self._invoke_with_prompt(synthesis_prompt)
-                return final_response
+            final_response = await self._invoke_with_prompt(synthesis_prompt)
+            return final_response
                 
-            except Exception as search_error:
-                logger.error(f"❌ 網路搜尋失敗: {search_error}")
-                # 回退到直接回答
-                fallback_prompt = f"""
+        except Exception as search_error:
+            logger.error(f"❌ 網路搜尋失敗: {search_error}")
+            # 回退到直接回答
+            fallback_prompt = f"""
 無法進行網路搜尋，請基於現有知識盡可能回答：
 
 {user_input}
@@ -218,7 +229,7 @@ FOCUS: [重點關注的資訊類型]
 2. 哪些資訊可能需要最新的網路搜尋
 3. 建議用戶如何獲取最新資訊
 """
-                return await self._invoke_with_prompt(fallback_prompt)
+            return await self._invoke_with_prompt(fallback_prompt)
                 
         except Exception as e:
             logger.error(f"❌ WebSearch 流程失敗: {e}")
@@ -299,6 +310,14 @@ FOCUS: [重點關注的資訊類型]
     def clear_conversation_log(self):
         """清空對話記錄"""
         self.conversation_log = []
+
+    async def __aexit__(self, exc_type, exc, tb):
+        # 清理 MCP 客戶端連線（若有啟動）
+        try:
+            if getattr(self, "_mcp_started", False) and hasattr(self, "mcp_client"):
+                await self.mcp_client.stop()
+        except Exception:
+            pass
 
 async def create_practical_agent_orchestrator(chat_service=None) -> Optional[PracticalAgentOrchestrator]:
     """創建實用的 Agent 協調器"""
