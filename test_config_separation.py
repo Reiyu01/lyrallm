@@ -30,6 +30,14 @@ def test_config_loading():
     slm_config = config_manager.get_slm_config()
     print(f"   Vector 權重: {vector_config.get('weight')}")
     print(f"   SLM 權重: {slm_config.get('weight')}")
+    print(f"   SLM 模型: {slm_config.get('model')} (提供商: {slm_config.get('provider')})")
+    print(f"   SLM 最大推理時間: {slm_config.get('max_inference_time')}ms")
+    
+    # 測試 SLM Prompt 配置
+    system_prompt = config_manager.get_slm_system_prompt()
+    if system_prompt:
+        print(f"   SLM 系統 Prompt 長度: {len(system_prompt)} 字符")
+        print(f"   SLM Prompt 預覽: {system_prompt[:100]}...")
     
     # 測試意圖映射
     intent_mapping = config_manager.get_intent_mapping()

@@ -60,6 +60,9 @@ def _ensure_plugin() -> OllamaWebSearchPlugin:
 
 
 def create_server() -> "FastMCP":
+    """
+    流程編號 #027: MCP服務器創建 - 創建FastMCP服務器並註冊工具
+    """
     if FastMCP is None:
         raise RuntimeError("MCP Server 初始化失敗：未安裝 mcp 套件。請先安裝 'mcp'。")
 
@@ -68,7 +71,10 @@ def create_server() -> "FastMCP":
 
     @server.tool()
     async def search(query: str, max_results: int = 5) -> str:
-        """使用 Ollama Web Search 進行網路搜尋，回傳 JSON 字串。"""
+        """
+        流程編號 #028A: 搜尋工具實現 - 執行實際的網路搜尋操作
+        使用 Ollama Web Search 進行網路搜尋，回傳 JSON 字串。
+        """
         try:
             return await plugin.search(query=query, max_results=max_results)  # type: ignore
         except Exception as e:
@@ -77,7 +83,10 @@ def create_server() -> "FastMCP":
 
     @server.tool()
     async def web_fetch(url: str) -> str:
-        """抓取指定 URL 的內容，回傳 JSON 字串。"""
+        """
+        流程編號 #028B: 網頁抓取工具實現 - 抓取指定URL內容
+        抓取指定 URL 的內容，回傳 JSON 字串。
+        """
         try:
             return await plugin.web_fetch(url=url)  # type: ignore
         except Exception as e:
@@ -86,7 +95,10 @@ def create_server() -> "FastMCP":
 
     @server.tool()
     async def get_search_status() -> str:
-        """回傳服務狀態 JSON 字串。"""
+        """
+        流程編號 #028C: 狀態查詢工具實現 - 檢查搜尋服務狀態
+        回傳服務狀態 JSON 字串。
+        """
         try:
             # 若 plugin 內部提供了狀態查詢，直接呼叫
             if hasattr(plugin, "get_search_status"):
@@ -104,6 +116,7 @@ def create_server() -> "FastMCP":
     @server.tool()
     async def get_current_time(format: str = "iso") -> str:
         """
+        流程編號 #028D: 時間工具實現 - 獲取當前系統時間
         取得目前時間
         
         Args:
@@ -139,6 +152,9 @@ def create_server() -> "FastMCP":
 
 
 async def main():
+    """
+    流程編號 #029: MCP服務器啟動 - 啟動stdio傳輸模式的MCP服務器
+    """
     server = create_server()
     
     # 使用 FastMCP 的 stdio 運行方式

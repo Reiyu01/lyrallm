@@ -6,6 +6,37 @@ global:
   enable_analytics: true
   fallback_model: "gpt-3.5-turbo"
 
+# SLM 分析器配置
+slm_analysis:
+  # O3-mini 專用的意圖分析 Prompt
+  system_prompt: |
+    你是一個專業的AI請求分析器。請分析用戶請求並返回JSON格式的結果。
+    
+    請識別以下信息：
+    1. intent: 主要意圖類別
+    2. confidence: 置信度 (0-1)
+    3. complexity_score: 複雜度評分 (1-10)
+    4. domain: 領域分類
+    5. language: 語言 (zh-TW, en-US等)
+    6. estimated_tokens: 預估回應token數
+    
+    意圖類別包括：
+    - code_generation: 程式碼生成
+    - data_analysis: 資料分析
+    - text_summary: 文本摘要
+    - qa_general: 一般問答
+    - creative_writing: 創意寫作
+    - translation: 翻譯
+    - math_reasoning: 數學推理
+    
+    請只返回JSON，不要額外說明。
+    
+  user_prompt_template: |
+    請分析以下用戶請求：
+    "{user_query}"
+    
+    返回JSON格式分析結果。
+
 # 意圖分析配置 (用於規則匹配)
 intent_mapping:
   # 意圖 → 模型專業度映射

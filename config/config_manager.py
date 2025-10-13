@@ -225,6 +225,22 @@ class ConfigManager:
             return {}
         return self.routing_rules.get('intent_mapping', {})
 
+    def get_slm_analysis_config(self) -> Dict:
+        """取得 SLM 分析器配置 (prompt 等)"""
+        if not self.routing_rules:
+            return {}
+        return self.routing_rules.get('slm_analysis', {})
+
+    def get_slm_system_prompt(self) -> str:
+        """取得 SLM 系統 Prompt"""
+        slm_config = self.get_slm_analysis_config()
+        return slm_config.get('system_prompt', '')
+
+    def get_slm_user_prompt_template(self) -> str:
+        """取得 SLM 用戶 Prompt 模板"""
+        slm_config = self.get_slm_analysis_config()
+        return slm_config.get('user_prompt_template', 'Analyze: {user_query}')
+
     def get_routing_rules(self) -> Optional[Dict]:
         """取得路由規則"""
         return self.routing_rules
