@@ -1,0 +1,241 @@
+# Semantic Kernel 模型配置
+server:
+  host: "0.0.0.0"
+  port: 8081
+  debug: false
+
+models:
+  default_model: "gpt-4o"
+  
+  #========================================
+  # 🔀 Hybrid Router 智能路由系統配置
+  #========================================
+  # 路由系統配置
+  routing:
+    enabled: true
+    strategy: "hybrid"  # hybrid | vector_only | rule_only | slm_only
+    config_file: "routing_rules.yaml"
+    
+    # 🤝 階段1: Vector+SLM 聯合意圖分析
+    intent_analysis:
+      enabled: true
+      mode: "parallel"  # parallel | progressive
+      
+      # Vector 分析器 (複用現有 SemanticRouter)
+      vector:
+        enabled: true
+        provider: "elasticsearch"  # 使用現有實現
+        similarity_threshold: 0.7
+        top_k: 5
+        weight: 0.3  # 降低權重，因為 O3-mini 更準確
+        
+      # SLM 分析器  
+      small_model:
+        enabled: true
+        provider: "azure_openai"  # huggingface | ollama | azure_openai | openai
+        model: "o3-mini"
+        deployment_name: "${AZURE_OPENAI_O3MINI_DEPLOYMENT_NAME}"
+        confidence_threshold: 0.8
+        max_inference_time: 500  # ms (O3-mini 需要更多時間)
+        weight: 0.7  # 提高權重因為 O3-mini 更準確
+        temperature: 0.1  # 低溫度確保一致性
+        max_tokens: 150   # 限制回應長度
+        
+      # 融合策略配置
+      fusion:
+        consensus_bonus: 0.2      # 意圖一致時的置信度加成
+        conflict_penalty: 0.1     # 意圖衝突時的置信度懲罰
+        uncertainty_threshold: 0.5 # 不確定性閾值
+        fast_path_threshold: 0.9   # Vector 快速通道閾值
+        
+    # 📋 階段2: 規則引擎決策
+    rule_engine:
+      enabled: true
+      config_file: "routing_rules.yaml"
+      
+    # 最終決策權重 (意圖分析 → 規則決策)
+    decision_flow:
+      intent_confidence_weight: 0.7   # 意圖分析結果權重
+      rule_match_weight: 0.3          # 規則匹配權重
+
+  available_models:
+    - name: "auto"
+      provider: "auto"
+      enabled: true
+      description: "Automatic routing: backend chooses the best model based on intent (select 'auto' to let router decide)"
+      # not a real provider; special virtual model for frontend convenience
+    - name: "gpt-4o"
+      provider: "azure_openai"
+      endpoint: "${AZURE_OPENAI_ENDPOINT}"
+      api_key: "${AZURE_OPENAI_API_KEY}"
+      deployment_name: "${AZURE_OPENAI_GPT4O_DEPLOYMENT_NAME}"
+      api_version: "${AZURE_OPENAI_API_VERSION}"
+      enabled: true
+      description: "Azure OpenAI GPT-4o via Semantic Kernel"
+      max_completion_tokens: 4096
+      # intents: list of intents this model should be considered for by the semantic router
+      # set to an empty list to let intent_routing map intents -> models instead
+      intents: ["general"]
+
+    - name: "o3-mini"
+      provider: "azure_openai"
+      endpoint: "${AZURE_OPENAI_ENDPOINT}"
+      api_key: "${AZURE_OPENAI_API_KEY}"
+      deployment_name: "${AZURE_OPENAI_O3MINI_DEPLOYMENT_NAME}"
+      api_version: "${AZURE_OPENAI_API_VERSION}"
+      enabled: true
+      description: "Azure OpenAI o3-mini via Semantic Kernel"
+      max_completion_tokens: 4096
+      intents: ["qa", "summarize"]
+
+    - name: "o1"
+      provider: "azure_openai"
+      endpoint: "${AZURE_OPENAI_ENDPOINT}"
+      api_key: "${AZURE_OPENAI_API_KEY}"
+      deployment_name: "o1"
+      api_version: "${AZURE_OPENAI_API_VERSION}"
+      enabled: true
+      description: "Azure OpenAI o1"
+      max_completion_tokens: 4096
+      intents: ["finance"]
+
+    - name: "gpt-4o"
+      provider: "openai"
+      endpoint: "${OPENAI_API_BASE_URL}"
+      api_key: "${OPENAI_API_KEY}"
+      enabled: false
+      description: "OpenAI GPT-4o via Semantic Kernel"
+      max_tokens: 4096
+      temperature: 0.7
+      intents: ["general"]
+
+    - name: "llama2-ollama"
+      provider: "ollama"
+      endpoint: "${OLLAMA_BASE_URL}"
+      enabled: false
+      description: "Llama 2 via Ollama and Semantic Kernel"
+      max_tokens: 2048
+      temperature: 0.8
+      intents: ["summarize"]
+
+providers:
+  azure_openai:
+    endpoint: "${AZURE_OPENAI_ENDPOINT}"
+    api_key: "${AZURE_OPENAI_API_KEY}"
+    api_version: "${AZURE_OPENAI_API_VERSION}"
+    timeout: 60
+  # Azure AI Foundry (範例設定)
+  # Foundry 常用參數為 model_id (而非 deployment_name)
+  azure_ai_foundry:
+    endpoint: "${AZURE_AI_FOUNDRY_ENDPOINT}"
+    api_key: "${AZURE_AI_FOUNDRY_API_KEY}"
+    api_version: "${AZURE_AI_FOUNDRY_API_VERSION}"
+    model_id: "${AZURE_AI_FOUNDRY_MODEL_ID}"
+    timeout: 60
+    
+  openai:
+    base_url: "${OPENAI_API_BASE_URL}"
+    api_key: "${OPENAI_API_KEY}"
+    timeout: 60
+    
+  ollama:
+    base_url: "${OLLAMA_BASE_URL}"
+    timeout: 30
+
+semantic_kernel:
+  # Semantic Kernel 特定設定
+  plugins_directory: "./plugins"
+  memory_store: "sqlite"
+  enable_planner: true
+  enable_functions: true
+
+#========================================
+# 🚌 Event Bus 配置 (Token 使用量監控)
+#========================================
+# 事件匯流排配置（可切換 inproc / redis_stream / both）
+event_bus:
+  backend: redis_stream        # 可選: inproc | redis_stream | both
+                               # - inproc: 使用 process 內的 asyncio.Queue（開發 / 單機）
+                               # - redis_stream: 使用 Redis Streams (可靠、consumer group)
+                               # - both: 同時 publish 到 inproc 與 redis_stream（方便平滑切換）
+  redis_url: "127.0.0.1:6379"
+  # redis_url: "${REDIS_URL}"    # Redis 連線字串，或直接填 "redis://localhost:6379/0"
+  stream_name: "token_usage_stream"  # Redis stream 名稱（可選）
+  group: "token_usage_group"          # consumer group 名稱（可選）
+  # maxlen: 100000                   # optional: XADD MAXLEN 約略保留長度（code 尚未使用，可擴充）
+  # dlq_stream: "token_usage_dlq"    # optional: 指定 DLQ stream（若未啟用會由 consumer 決定行為）
+
+#========================================  
+# 📊 Analytics 資料庫配置
+#========================================
+# 資料庫配置
+storages:
+  analytics:
+    type: elasticsearch
+    es:
+      endpoint: "http://127.0.0.1:9200"
+      index: "analytics_index"
+
+# storages:
+#   analytics:
+#     # 擇一選項：將 analytics 儲存在 Postgres 或 Elasticsearch。
+#     # 預設使用 Postgres（結構化事件、token 計費、報表用）：
+#     type: postgres
+#     dsn: "postgresql://sk_user:SkPass123!@127.0.0.1:5432/token_db"
+
+#     # 如果你想用 Elasticsearch 當作 analytics 儲存（例如需要全文/搜尋/觀察），
+#     # 請把上面 `type` 改為 `elasticsearch`，並啟用下面的 `es` 區塊；
+#     # 注意：兩者為擇一（choose one），不要同時作為 primary analytics target，
+#     # 若需要同時寫入監控/索引，可在程式中額外實作複製（eg. write to both）。
+#     # Elasticsearch 範例（註解，請取消註解以啟用）：
+#     # type: elasticsearch
+#     # es:
+#     #   endpoint: "http://127.0.0.1:9200"
+#     #   index: "analytics_index"
+#     #   # 可加額外設定，如 username/password、ssl 等
+
+#========================================
+# 🔍 Vector Database 配置 (Semantic Routing)
+#========================================
+# Vector DB configuration (high-level routing / vector store options)
+vectordb:
+  provider: "elasticsearch"   # supported: elasticsearch (future: qdrant, milvus, weaviate)
+  endpoint: "http://127.0.0.1:9200"
+  api_key: "${ES_LOCAL_API_KEY}"  # 請在 .env 中設定
+  index: "semantic_index"
+  embedding_dims: 1536
+  top_k: 5
+
+#========================================
+# 🔤 Embeddings 配置
+#========================================
+embeddings:
+  provider: azure_openai
+  model: "text-embedding-ada-002" 
+  endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  api_version: "${AZURE_OPENAI_API_VERSION}"
+  # optional: tune provider-specific settings here
+  # timeout, batch_size, etc.
+
+# Alternative embedding providers (uncomment to use):
+# embeddings:
+#   provider: sentence_transformers
+#   model: all-MiniLM-L6-v2
+# embeddings:
+#   provider: fake
+
+#========================================
+# 📡 ELK Stack 日誌配置
+#========================================
+elk:
+  use_udp: true  #(False)
+  http_endpoint: "udp://elk.54ucl.com:50000"
+
+#========================================
+# 📝 Logging 配置
+#========================================
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "semantic_kernel.log"
