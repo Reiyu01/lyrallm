@@ -28,7 +28,7 @@ slm_analysis:
     - creative_writing: 創意寫作
     - translation: 翻譯
     - math_reasoning: 數學推理
-    
+    - finance: 金融/市場/財經相關問答
     請只返回JSON，不要額外說明。
     
   user_prompt_template: |

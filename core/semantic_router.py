@@ -1,23 +1,27 @@
 """Semantic router: embed -> vector search -> intent vote -> model selection -> model call
 
-This is a minimal implementation for demo/MVP purposes. Embedding provider is
-abstracted; the demo script uses a deterministic fake embedding to keep things
-self-contained.
+Minimal MVP implementation of vector-based intent routing. Now reads routing
+configuration via config_manager accessors to keep keys consistent with
+`models.routing.*` and `config/routing_rules.yaml`.
 """
 import asyncio
 from typing import List, Dict, Any
+import logging
+
 from lyrallm.config.config_manager import config_manager
 from lyrallm.adapters.elasticsearch_adapter import ElasticsearchAdapter
 from lyrallm.adapters.factory import get_adapter
-from embedding_provider import get_default_provider
-import logging
+from lyrallm.embedding_provider import get_default_provider
 
 logger = logging.getLogger(__name__)
 
 
 class SemanticRouter:
     def __init__(self):
-        self.cfg = config_manager.config
+        # Snapshot configs via accessors to avoid relying on raw dict structure
+        self.routing_cfg = config_manager.get_routing_config() or {}
+        self.vector_cfg = config_manager.get_vector_config() or {}
+        self.fusion_cfg = config_manager.get_fusion_config() or {}
         self.vec_adapter = ElasticsearchAdapter()
         # analytics adapter via factory
         self.analytics = get_adapter('analytics')
@@ -48,31 +52,66 @@ class SemanticRouter:
         return {'intent': best_intent, 'confidence': confidence, 'votes': votes}
 
     async def route(self, query: str) -> Dict[str, Any]:
+        # Embed & vector search
         vec = await self.embed(query)
-        hits = await self.vec_adapter.search_by_vector(vec, k=self.cfg.get('vectordb', {}).get('top_k', 5))
-        resolved = self.resolve_intent_from_hits(hits, threshold=self.cfg.get('intent_routing', {}).get('confidence_threshold', 0.55))
-        intent = resolved['intent'] or self.cfg.get('intent_routing', {}).get('default_intent', 'general')
-        if resolved['confidence'] < self.cfg.get('intent_routing', {}).get('confidence_threshold', 0.55):
-            intent = self.cfg.get('intent_routing', {}).get('default_intent', 'general')
+        top_k = self.vector_cfg.get('top_k', config_manager.config.get('vectordb', {}).get('top_k', 5))
+        hits = await self.vec_adapter.search_by_vector(vec, k=top_k)
 
-        # choose model: prefer explicit intent_map, else pick first model that lists the intent
+        # Resolve intent and apply threshold from routing config
+        # Default thresholds
+        default_conf_threshold = 0.55
+        # Prefer SLM threshold if configured (usually stricter), else no-op for vector-only
+        slm_cfg = config_manager.get_slm_config() or {}
+        conf_threshold = (
+            slm_cfg.get('confidence_threshold')
+            or self.fusion_cfg.get('uncertainty_threshold')
+            or default_conf_threshold
+        )
+
+        resolved = self.resolve_intent_from_hits(hits, threshold=conf_threshold)
+
+        default_intent = 'general'
+        intent = resolved['intent'] or default_intent
+        if resolved['confidence'] < conf_threshold:
+            intent = default_intent
+
+        # Choose model: try intent mapping from routing rules first
         model_id = None
-        intent_map = self.cfg.get('intent_routing', {}).get('intent_map', {})
+        intent_map = config_manager.get_intent_mapping() or {}
         if intent_map:
-            model_id = intent_map.get(intent)
+            # intent_mapping can be a nested structure; try simple direct mapping first
+            mapped = intent_map.get(intent)
+            if isinstance(mapped, str):
+                model_id = mapped
+            elif isinstance(mapped, dict):
+                # If preferred_models exists, pick the first available & enabled
+                preferred = mapped.get('preferred_models') or []
+                for cand in preferred:
+                    if config_manager.is_model_enabled(cand):
+                        model_id = cand
+                        break
+
+        # Fallback: scan available models that declare the intent
         if not model_id:
-            # scan available models for one that declares the intent
-            for m in self.cfg.get('models', {}).get('available_models', []):
+            for m in config_manager.get_available_models():
                 if intent in (m.get('intents') or []):
                     model_id = m.get('name')
                     break
-        if not model_id:
-            model_id = self.cfg.get('models', {}).get('default_model')
 
-        # For MVP, model call is mocked — in production you'd call semantic-kernel's model executor
+        # Final fallback to default model
+        if not model_id:
+            model_id = config_manager.get_default_model()
+
+        # MVP mock reply — production path handled by ModelExecutor
         reply = f'[MOCK {model_id}] 回應：針對 "{query}"（意圖: {intent}）'
 
-        routing = {'intent': intent, 'confidence': resolved['confidence'], 'model': model_id, 'votes': resolved['votes'], 'hits': hits}
+        routing = {
+            'intent': intent,
+            'confidence': resolved['confidence'],
+            'model': model_id,
+            'votes': resolved['votes'],
+            'hits': hits,
+        }
 
         # write analytics (best-effort)
         try:
