@@ -1,14 +1,12 @@
-# routing_rules.yaml - 企業級路由規則配置
-global:
-  # 全局設置
-  default_timeout: 30
-  max_concurrent_requests: 1000
-  enable_analytics: true
+# routing_rules.yaml - 路由規則配置（slm_rules 策略專用）
+
+# 全局預設值
+defaults:
   fallback_model: "gpt-3.5-turbo"
+  confidence_floor: 0.6  # 低於此信心值視為不確定，退回 qa_general
 
 # SLM 分析器配置
 slm_analysis:
-  # O3-mini 專用的意圖分析 Prompt
   system_prompt: |
     你是一個專業的AI請求分析器。請分析用戶請求並返回JSON格式的結果。
     
@@ -16,9 +14,9 @@ slm_analysis:
     1. intent: 主要意圖類別
     2. confidence: 置信度 (0-1)
     3. complexity_score: 複雜度評分 (1-10)
-    4. domain: 領域分類
+    4. domain: 領域分類（可選）
     5. language: 語言 (zh-TW, en-US等)
-    6. estimated_tokens: 預估回應token數
+    6. estimated_tokens: 預估回應token數（可選）
     
     意圖類別包括：
     - code_generation: 程式碼生成
@@ -29,6 +27,7 @@ slm_analysis:
     - translation: 翻譯
     - math_reasoning: 數學推理
     - finance: 金融/市場/財經相關問答
+    
     請只返回JSON，不要額外說明。
     
   user_prompt_template: |
@@ -37,258 +36,21 @@ slm_analysis:
     
     返回JSON格式分析結果。
 
-# 意圖分析配置 (用於規則匹配)
-intent_mapping:
-  # 意圖 → 模型專業度映射
+# Intent 定義與閾值（目前僅供參考，capability 模式不使用 threshold）
+intents:
   code_generation:
-    preferred_models: ["gpt-4", "claude-3-sonnet"]
-    complexity_threshold: 7.0  # 高於此複雜度使用高級模型
-    
+    threshold: 7.0
   data_analysis:
-    preferred_models: ["gpt-4", "claude-3-sonnet"] 
-    complexity_threshold: 6.0
-    
+    threshold: 6.0
   text_summary:
-    preferred_models: ["gpt-3.5-turbo", "claude-3-haiku"]
-    complexity_threshold: 4.0
-    
+    threshold: 4.0
   qa_general:
-    preferred_models: ["gpt-3.5-turbo", "ollama-llama2"]
-    complexity_threshold: 3.0
-    
+    threshold: 3.0
   creative_writing:
-    preferred_models: ["claude-3-sonnet", "gpt-4"]
-    complexity_threshold: 5.0
-  
-  # 新架構權重配置
-  routing_weights:
-    intent_analysis_result: 0.7  # Vector+SLM 聯合意圖分析權重
-    rule_match_result: 0.3       # 規則引擎匹配權重
-  
-  # 成本控制
-  cost_management:
-    daily_budget_usd: 1000
-    per_user_limit_usd: 50
-    cost_alert_threshold: 0.8
-    emergency_stop_threshold: 0.95
-
-# 用戶分層管理
-user_tiers:
-  basic:
-    max_requests_per_day: 100
-    allowed_models: ["gpt-3.5-turbo", "ollama-llama2"]
-    max_tokens: 4000
-    priority: 1
-    
-  premium:
-    max_requests_per_day: 1000
-    allowed_models: ["gpt-4", "gpt-3.5-turbo", "claude-3-sonnet"]
-    max_tokens: 8000
-    priority: 5
-    
-  enterprise:
-    max_requests_per_day: -1  # 無限制
-    allowed_models: ["*"]     # 所有模型
-    max_tokens: 32000
-    priority: 10
-
-# 模型配置與排序
-models:
-  gpt-4:
-    provider: "openai"
-    cost_per_1k_tokens: 0.03
-    performance_score: 9.5
-    max_concurrent: 50
-    fallback_models: ["gpt-3.5-turbo", "claude-3-sonnet"]
-    specialties: ["reasoning", "coding", "analysis"]
-    
-  gpt-3.5-turbo:
-    provider: "openai" 
-    cost_per_1k_tokens: 0.002
-    performance_score: 8.0
-    max_concurrent: 200
-    fallback_models: ["ollama-llama2", "claude-3-haiku"]
-    specialties: ["general", "conversation"]
-    
-  claude-3-sonnet:
-    provider: "anthropic"
-    cost_per_1k_tokens: 0.015
-    performance_score: 9.0
-    max_concurrent: 100
-    fallback_models: ["gpt-4", "gpt-3.5-turbo"]
-    specialties: ["creative", "analysis", "safety"]
-
-# 路由規則定義
-routing_rules:
-  # 高優先級規則 (9-10)
-  - name: "emergency_fallback"
-    priority: 10
-    enabled: true
-    description: "所有主要模型不可用時的緊急回退"
-    conditions:
-      - type: "all_primary_models_down"
-    action:
-      type: "route_to"
-      target_models: ["ollama-llama2"]
-      emergency_mode: true
-      
-  - name: "enterprise_user_priority"
-    priority: 9
-    enabled: true
-    description: "企業用戶優先路由"
-    conditions:
-      - type: "user_tier"
-        value: "enterprise"
-    action:
-      type: "route_to"
-      target_models: ["gpt-4", "claude-3-sonnet"]
-      queue_priority: "high"
-
-  # 內容分析規則 (7-8)
-  - name: "expert_complexity_routing"
-    priority: 8
-    enabled: true
-    description: "高複雜度任務專用路由"
-    conditions:
-      - type: "complexity_score"
-        operator: "greater_than"
-        value: 8.0
-      - type: "confidence"
-        operator: "greater_than" 
-        value: 0.8
-    action:
-      type: "route_to"
-      target_models: ["gpt-4", "claude-3-sonnet"]
-      reasoning: "高複雜度需要頂級模型"
-      
-  - name: "code_generation_specialist"
-    priority: 8
-    enabled: true
-    description: "程式碼生成專用路由"
-    conditions:
-      - type: "intent"
-        value: "代碼編寫"
-      - type: "domain" 
-        value: "技術開發"
-      - type: "confidence"
-        operator: "greater_than"
-        value: 0.7
-    action:
-      type: "route_to"
-      target_models: ["gpt-4", "gpt-3.5-turbo"]
-      specialist_mode: true
-
-  # 成本控制規則 (5-6)  
-  - name: "cost_budget_control"
-    priority: 6
-    enabled: true
-    description: "基於用戶預算的模型選擇"
-    conditions:
-      - type: "user_daily_spend"
-        operator: "greater_than_percent"
-        value: 80  # 已用80%預算
-    action:
-      type: "route_to"
-      target_models: ["gpt-3.5-turbo", "ollama-llama2"]
-      reason: "cost_saving"
-      
-  - name: "simple_task_optimization"
-    priority: 5
-    enabled: true
-    description: "簡單任務成本優化"
-    conditions:
-      - type: "complexity_score"
-        operator: "less_than"
-        value: 3.0
-      - type: "confidence" 
-        operator: "greater_than"
-        value: 0.9
-    action:
-      type: "route_to"
-      target_models: ["gpt-3.5-turbo", "ollama-llama2"]
-      cost_optimized: true
-
-  # 時間與負載規則 (3-4)
-  - name: "peak_hour_load_balancing"
-    priority: 4
-    enabled: true
-    description: "高峰時段負載分散"
-    conditions:
-      - type: "time_range"
-        value: [9, 17]  # 9AM-5PM
-      - type: "system_load"
-        operator: "greater_than"
-        value: 0.8
-    action:
-      type: "distribute_load"
-      target_models: ["gpt-3.5-turbo", "claude-3-haiku", "ollama-llama2"]
-      strategy: "least_loaded"
-      
-  # 預設規則 (1-2)
-  - name: "default_routing"
-    priority: 1
-    enabled: true
-    description: "預設路由規則"
-    conditions: []  # 無條件，總是匹配
-    action:
-      type: "route_to"
-      target_models: ["gpt-3.5-turbo"]
-      fallback: true
-
-# 故障轉移策略
-circuit_breaker:
-  failure_threshold: 5        # 連續失敗閾值
-  timeout_duration: 60       # 熔斷器打開時間（秒）
-  recovery_timeout: 300      # 恢復測試間隔（秒）
-  half_open_max_calls: 3     # 半開狀態最大測試調用數
-  
-  # 分級故障轉移
-  fallback_strategy:
-    level_1: # 同類型模型轉移
-      - from: "gpt-4"
-        to: ["gpt-3.5-turbo", "claude-3-sonnet"] 
-    level_2: # 跨供應商轉移
-      - from: ["gpt-4", "gpt-3.5-turbo"]
-        to: ["claude-3-sonnet", "claude-3-haiku"]
-    level_3: # 本地模型降級
-      - from: ["gpt-*", "claude-*"]
-        to: ["ollama-llama2", "ollama-mistral"]
-    level_4: # 緊急模式
-      - from: "*"
-        to: "emergency_response"
-
-# 負載平衡配置
-load_balancing:
-  strategies:
-    default: "adaptive"
-    
-  adaptive_weights:
-    response_time: 0.4      # 響應時間權重
-    error_rate: 0.3         # 錯誤率權重  
-    availability: 0.2       # 可用性權重
-    cost_efficiency: 0.1    # 成本效益權重
-    
-  health_check:
-    interval_seconds: 30
-    timeout_seconds: 5
-    retry_attempts: 3
-    
-# 監控與分析
-analytics:
-  enable_request_logging: true
-  enable_performance_metrics: true
-  enable_cost_tracking: true
-  
-  metrics_retention_days: 30
-  
-  alerts:
-    high_error_rate:
-      threshold: 0.05  # 5%錯誤率
-      notification: ["email", "webhook"]
-      
-    budget_exceeded:
-      threshold: 0.9   # 90%預算用完
-      notification: ["email", "sms"]
-      
-    model_unavailable:
-      notification: ["webhook", "slack"]
+    threshold: 5.0
+  translation:
+    threshold: 4.0
+  math_reasoning:
+    threshold: 7.0
+  finance:
+    threshold: 6.0

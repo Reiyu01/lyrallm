@@ -32,8 +32,8 @@ class RuleEngineV1:
             if not p.is_absolute():
                 p = Path(__file__).parent.parent.parent / 'config' / p.name
             return p
-        # default
-        return Path(__file__).parent.parent.parent / 'config' / 'routing_rules_v1.yaml'
+        # default: use main routing_rules.yaml (unified config)
+        return Path(__file__).parent.parent.parent / 'config' / 'routing_rules.yaml'
 
     def _load_rules(self, path: Path) -> Dict[str, Any]:
         try:

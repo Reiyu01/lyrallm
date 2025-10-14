@@ -29,8 +29,6 @@ class ModelExecutor:
     def __init__(self):
         # Kernel cache for performance optimization
         self._kernel_cache: Dict[str, sk.Kernel] = {}
-        # Router instance (lazy loaded)
-        self._router = None
 
     async def generate(self, model_name: str, messages: Optional[List[Any]] = None,
                        temperature: float = 0.7, max_tokens: Optional[int] = None,
@@ -113,29 +111,13 @@ class ModelExecutor:
 
             logger.info(f"[{request_id}] Routing query: '{query[:100]}...'")
             
-            # Choose strategy
-            strategy = (config_manager.get_routing_config() or {}).get('strategy', 'hybrid')
-
-            if strategy == 'slm_rules':
-                # Use RouterV1: SLM analyzer + simple rule engine
-                from .router_v1 import RouterV1
-                router = RouterV1()
-                routing_info = await router.route(query)
-                intent = routing_info.get('intent', 'qa_general')
-                confidence = routing_info.get('confidence', 0.0)
-                selected_model = routing_info.get('model')
-            else:
-                # Perform semantic routing (vector-based MVP)
-                if not self._router:
-                    from .semantic_router import SemanticRouter
-                    self._router = SemanticRouter()
-                    await self._router.ensure_indexes()
-
-                route_result = await self._router.route(query)
-                routing_info = route_result.get('routing', {})
-                intent = routing_info.get('intent', 'general')
-                confidence = routing_info.get('confidence', 0.0)
-                selected_model = routing_info.get('model')
+            # Use RouterV1: SLM analyzer + rule engine (slm_rules strategy)
+            from .router_v1 import RouterV1
+            router = RouterV1()
+            routing_info = await router.route(query)
+            intent = routing_info.get('intent', 'qa_general')
+            confidence = routing_info.get('confidence', 0.0)
+            selected_model = routing_info.get('model')
             
             # Get model recommendation from health-aware manager
             model_manager = get_model_manager_sync()

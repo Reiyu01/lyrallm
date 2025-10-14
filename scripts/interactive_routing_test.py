@@ -62,27 +62,47 @@ async def run_single_turn(executor: ModelExecutor, user_input: str, model: str, 
 
     print("\n=== Routing Result ===")
     print(f"Input: {user_input}")
+    
+    # Analyzer details
     if analyzer:
         print(f"Intent: {analyzer.get('intent')}  (confidence={analyzer.get('confidence')})")
         print(f"Complexity: {analyzer.get('complexity')}")
+        analyzer_ms = analyzer.get('ms')
+        if analyzer_ms is not None:
+            print(f"Analyzer Time: {analyzer_ms} ms")
+    
+    # Decision details
     if decision:
         print(f"Selected Model: {result.get('model')} (decision model: {decision.get('selected')})")
         router_name = trace.get('router') or 'unknown'
         print(f"Router: {router_name}")
+        
+        # SLM model info with fallback status
         analyzer_trace = trace.get('analyzer', {})
         slm_model = analyzer_trace.get('slm_model')
         eff_model = analyzer_trace.get('effective_slm_model') or slm_model
         fallback = analyzer_trace.get('fallback')
         if slm_model:
             label = "SLM Model"
+            status_parts = []
             if fallback:
-                label += " [FALLBACK]"
+                status_parts.append("FALLBACK - used default values")
             if eff_model and eff_model != slm_model:
-                print(f"{label}: {slm_model} (effective: {eff_model})")
+                status_parts.append(f"effective: {eff_model}")
+            if status_parts:
+                print(f"{label}: {slm_model} [{', '.join(status_parts)}]")
             else:
-                print(f"{label}: {slm_model}")
+                print(f"{label}: {slm_model} [SUCCESS]")
+        
         print("Candidates:", decision.get('candidates'))
-    print(f"Latency: {latency:.1f} ms")
+        
+        # Decision path (execution flow proof)
+        decision_path = trace.get('decision_path')
+        if decision_path:
+            print(f"Execution Path: {' → '.join(decision_path)}")
+    
+    print(f"Total Latency: {latency:.1f} ms")
+    
     if capability_details:
         print("\nCapability Details:\n" + format_capability_table(capability_details, decision.get('selected')))
     print("\n=== Model Response (truncated 800 chars) ===\n")
