@@ -31,10 +31,10 @@ models:
       small_model:
         enabled: true
         provider: "ollama"  # huggingface | ollama | azure_openai | openai
-        model: "gpt-oss:120b"
+        model: "gemma3:12b"
         #deployment_name: "${AZURE_OPENAI_O3MINI_DEPLOYMENT_NAME}"
         # confidence_threshold: 0.8
-        max_inference_time: 500  # ms (120b 大模型需要更多時間，設為 60 秒(60000))
+        max_inference_time: 50000  # ms (120b 大模型需要更多時間，設為 60 秒(60000))
         # weight: 0.7  # 提高權重因為 O3-mini 更準確
         temperature: 0.1  # 低溫度確保一致性
         max_tokens: 150   # 限制回應長度
@@ -76,7 +76,7 @@ models:
       # intents: list of intents this model should be considered for by the semantic router
       # set to an empty list to let intent_routing map intents -> models instead
       intents: ["general"]
-      iq_score: 92   # placeholder IQ score (will be mapped to percentile -> capability level)
+      iq_score: 25   # placeholder IQ score (will be mapped to percentile -> capability level)
 
 
     - name: "o3-mini"
@@ -91,7 +91,7 @@ models:
       max_completion_tokens: 4096
       intents: ["qa", "summarize"]
       # approximate capability baseline lower than gpt-4o
-      iq_score: 70
+      iq_score: 48
 
 
     - name: "o1"
@@ -105,7 +105,8 @@ models:
       #max_tokens: 4096
       max_completion_tokens: 4096
       intents: ["finance"]
-      iq_score: 88
+      iq_score: 47
+
 
 
 
@@ -118,10 +119,10 @@ models:
       max_tokens: 4096
       temperature: 0.7
       intents: ["general"]
-      iq_score: 92
+      iq_score: 25
 
 
-    - name: "llama2-ollama"
+    - name: "gpt-oss:20b"
       provider: "ollama"
       endpoint: "${OLLAMA_BASE_URL}"
       enabled: false
@@ -129,7 +130,7 @@ models:
       max_tokens: 2048
       temperature: 0.8
       intents: ["summarize"]
-      iq_score: 65
+      iq_score: 43
 
 
 
