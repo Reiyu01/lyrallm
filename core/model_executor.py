@@ -29,8 +29,6 @@ class ModelExecutor:
     def __init__(self):
         # Kernel cache for performance optimization
         self._kernel_cache: Dict[str, sk.Kernel] = {}
-        # Router instance (lazy loaded)
-        self._router = None
 
     async def generate(self, model_name: str, messages: Optional[List[Any]] = None,
                        temperature: float = 0.7, max_tokens: Optional[int] = None,
@@ -113,32 +111,28 @@ class ModelExecutor:
 
             logger.info(f"[{request_id}] Routing query: '{query[:100]}...'")
             
-            # Perform semantic routing
-            if not self._router:
-                from .semantic_router import SemanticRouter
-                self._router = SemanticRouter()
-                await self._router.ensure_indexes()
-
-            route_result = await self._router.route(query)
-            routing_info = route_result.get('routing', {})
-            intent = routing_info.get('intent', 'general')
+            # Use RouterV1: SLM analyzer + rule engine (slm_rules strategy)
+            from .router_v1 import RouterV1
+            router = RouterV1()
+            routing_info = await router.route(query)
+            intent = routing_info.get('intent', 'qa_general')
             confidence = routing_info.get('confidence', 0.0)
+            selected_model = routing_info.get('model')
             
             # Get model recommendation from health-aware manager
             model_manager = get_model_manager_sync()
             if model_manager:
-                selected_model = model_manager.get_best_model_for_intent(intent)
-                if selected_model:
+                best = model_manager.get_best_model_for_intent(intent)
+                if best:
                     routing_info.update({
-                        'selected_model': selected_model,
+                        'selected_model': best,
                         'selection_reason': 'health_aware_routing',
                         'intent': intent,
                         'confidence': confidence
                     })
-                    return selected_model, routing_info
+                    return best, routing_info
             
-            # Fallback to traditional routing
-            selected_model = routing_info.get('model')
+            # Fallback to selected or traditional routing
             if not selected_model or not self._is_model_available(selected_model):
                 logger.warning(f"[{request_id}] Routed model unavailable, using fallback")
                 selected_model = self._get_fallback_model()
@@ -293,10 +287,15 @@ class ModelExecutor:
 
     def _apply_generation_settings(self, execution_settings, model_cfg: Dict, temperature: float, max_tokens: Optional[int]):
         """Apply generation parameters to execution settings."""
-        try:
-            execution_settings.temperature = temperature
-        except AttributeError:
-            logger.debug("Temperature setting not supported by this provider")
+        # Some reasoning / structured models (o1/o3 family) may reject temperature
+        model_name = model_cfg.get('deployment_name') or model_cfg.get('name') or ''
+        if not any(x in model_name for x in ['o1', 'o3']):
+            try:
+                execution_settings.temperature = temperature
+            except AttributeError:
+                logger.debug("Temperature setting not supported by this provider")
+        else:
+            logger.debug(f"Skip temperature for reasoning model: {model_name}")
 
         max_tokens_value = max_tokens or model_cfg.get('max_completion_tokens') or model_cfg.get('max_tokens')
         if max_tokens_value:

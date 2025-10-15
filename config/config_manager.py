@@ -309,5 +309,52 @@ class ConfigManager:
         model = self.get_model_by_name(model_name)
         return model.get('enabled', False) if model else False
 
+    # -----------------------------
+    # Capability / IQ → percentile → level (1-10)
+    # -----------------------------
+    def _compute_capability_cache(self):
+        if hasattr(self, '_capability_cache') and self._capability_cache:
+            return
+        models = [m for m in self.get_all_models() if m.get('iq_score') is not None]
+        if not models:
+            self._capability_cache = {}
+            return
+        # Rank-based percentile
+        scored = sorted(models, key=lambda m: m.get('iq_score'))
+        n = len(scored)
+        percentiles = {}
+        for idx, m in enumerate(scored, start=1):
+            pr = 100.0 * (idx - 0.5) / n
+            percentiles[m['name']] = pr
+        # Map PR -> capability level (1..10) using optional gamma
+        gamma = 1.0  # could make configurable later
+        capability = {}
+        for m in models:
+            pr = percentiles[m['name']]
+            level = 1 + 9 * ((pr / 100.0) ** gamma)
+            capability[m['name']] = {
+                'iq': m.get('iq_score'),
+                'pr': pr,
+                'base_level': round(level, 2)
+            }
+        self._capability_cache = capability
+
+    def get_model_capability(self, model_name: str, intent: str = None) -> dict:
+        """Return capability info for model (intent now ignored for level adjustment)."""
+        self._compute_capability_cache()
+        base = self._capability_cache.get(model_name)
+        if not base:
+            return {'level': None, 'pr': None, 'iq': None}
+        level = base['base_level']
+        return {
+            'level': level,
+            'pr': base['pr'],
+            'iq': base['iq']
+        }
+
+    def get_all_capabilities(self) -> dict:
+        self._compute_capability_cache()
+        return self._capability_cache.copy()
+
 # 全域實例
 config_manager = ConfigManager()

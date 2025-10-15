@@ -1,0 +1,44 @@
+defaults:
+  fallback_model: gpt-3.5-turbo
+  confidence_floor: 0.6
+
+intents:
+  code_generation:
+    threshold: 7.0
+    high: ["gpt-4o", "claude-3-sonnet"]
+    low:  ["gpt-3.5-turbo", "o3-mini"]
+
+  data_analysis:
+    threshold: 6.0
+    high: ["gpt-4o"]
+    low:  ["gpt-3.5-turbo"]
+
+  text_summary:
+    threshold: 4.0
+    high: ["gpt-4o"]
+    low:  ["o3-mini", "gpt-3.5-turbo"]
+
+  qa_general:
+    threshold: 3.0
+    high: ["gpt-4o"]
+    low:  ["o3-mini", "gpt-3.5-turbo"]
+
+  creative_writing:
+    threshold: 5.0
+    high: ["claude-3-sonnet", "gpt-4o"]
+    low:  ["gpt-3.5-turbo"]
+
+  translation:
+    threshold: 4.0
+    high: ["gpt-4o"]
+    low:  ["gpt-3.5-turbo"]
+
+  math_reasoning:
+    threshold: 7.0
+    high: ["gpt-4o"]
+    low:  ["gpt-3.5-turbo"]
+
+  finance_qa:
+    threshold: 6.0
+    high: ["o1", "gpt-4o"]
+    low:  ["gpt-3.5-turbo"]
