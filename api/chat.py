@@ -826,6 +826,10 @@ async def chat_health_check():
         except Exception:
             pg_health = {"connected": False}
 
+        # 獲取已加載的模型數量
+        available_models = config_manager.get_available_models()
+        models_count = len([m for m in available_models if m.get('enabled', False)])
+
         return {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
@@ -837,7 +841,7 @@ async def chat_health_check():
             },
             "event_bus_info": event_status,
             "postgres_info": pg_health,
-            "models_loaded": len(sk_service.kernels)
+            "models_loaded": models_count
         }
         
     except Exception as e:
