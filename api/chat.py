@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request
-from typing import List, Dict, Optional, Any, AsyncGenerator
+from typing import List, Dict, Optional, Any, AsyncGenerator, Tuple
 from pydantic import BaseModel
 import time
 import logging
@@ -471,10 +471,82 @@ def get_queue_status():
         logger.error(f"Failed to get event bus status: {e}")
         return {"queue_length": -1, "subscribers": 0, "running": False}
 
+async def resolve_agent_model(request_model: str, user_query: str, request_id: str) -> Tuple[str, List[str], Dict[str, Any]]:
+    """
+    為 Agent 模式解析模型，支援自動路由和手動選擇
+    
+    Args:
+        request_model: 使用者請求的模型名稱（可能是 'auto' 或具體模型名）
+        user_query: 使用者查詢內容，用於自動路由分析
+        request_id: 請求 ID，用於日誌追蹤
+    
+    Returns:
+        Tuple[actual_model, candidates, routing_info]
+        - actual_model: 實際選擇的模型名稱
+        - candidates: 候選模型列表
+        - routing_info: 路由資訊（包含 intent, confidence, complexity 等）
+    """
+    if request_model == "auto":
+        logger.info(f"[{request_id}] 偵測到 auto 模式，執行自動路由")
+        
+        try:
+            # 使用 RouterV1 進行自動路由
+            from lyrallm.core.router_v1 import RouterV1
+            router = RouterV1()
+            routing_info = await router.route(user_query)
+            
+            # 提取路由結果
+            selected_model = routing_info.get('model')
+            candidates = routing_info.get('candidates', [])
+            intent = routing_info.get('intent', 'qa_general')
+            confidence = routing_info.get('confidence', 0.0)
+            complexity = routing_info.get('complexity', 5.0)
+            
+            # 驗證選擇的模型
+            if not selected_model:
+                logger.warning(f"[{request_id}] Router 未返回模型，使用預設模型")
+                selected_model = config_manager.get_default_model() or "gpt-4o"
+                candidates = [selected_model]
+            
+            # 驗證模型配置存在
+            model_config = config_manager.get_model_by_name(selected_model)
+            if not model_config:
+                logger.warning(f"[{request_id}] 路由選擇的模型 '{selected_model}' 不存在，嘗試候選模型")
+                # 嘗試候選模型
+                for candidate in candidates:
+                    if config_manager.get_model_by_name(candidate):
+                        selected_model = candidate
+                        logger.info(f"[{request_id}] 使用候選模型: {selected_model}")
+                        break
+                else:
+                    # 所有候選模型都不可用，使用預設模型
+                    selected_model = config_manager.get_default_model() or "gpt-4o"
+                    candidates = [selected_model]
+                    logger.warning(f"[{request_id}] 候選模型都不可用，使用預設模型: {selected_model}")
+            
+            logger.info(f"[{request_id}] 自動路由完成")
+            logger.info(f"[{request_id}] 選擇模型: {selected_model}")
+            logger.info(f"[{request_id}] 候選模型: {candidates}")
+            logger.info(f"[{request_id}] 意圖: {intent}, 信心度: {confidence:.3f}, 複雜度: {complexity:.1f}")
+            
+            return selected_model, candidates, routing_info
+            
+        except Exception as e:
+            logger.error(f"[{request_id}] 自動路由失敗: {e}")
+            # 降級到預設模型
+            fallback_model = config_manager.get_default_model() or "gpt-4o"
+            logger.warning(f"[{request_id}] 降級使用預設模型: {fallback_model}")
+            return fallback_model, [fallback_model], {"error": str(e), "fallback": True}
+    
+    else:
+        # 手動選擇模式，直接返回指定的模型
+        logger.info(f"[{request_id}] 手動選擇模型: {request_model}")
+        return request_model, [request_model], {"manual_selection": True}
+
 async def handle_agent_mode_request(request: ChatCompletionRequest) -> ChatCompletionResponse:
     """
     流程編號 #004: Agent模式處理入口 - 初始化Agent協調器
-    處理 Agent 模式請求 - 使用多 Agent 協作
+    處理 Agent 模式請求 - 使用多 Agent 協作（支援自動路由）
     """
     request_id = f"agent_{uuid.uuid4().hex[:12]}"
     start_time = datetime.now()
@@ -489,15 +561,20 @@ async def handle_agent_mode_request(request: ChatCompletionRequest) -> ChatCompl
         
         user_input = user_messages[-1]
         
-        # 創建聊天服務
-        model_config = config_manager.get_model_by_name(request.model)
-        if not model_config:
-            raise ValueError(f"Model '{request.model}' not found")
+        # 🔑 新增：解析模型（支援自動路由和手動選擇）
+        actual_model, candidates, routing_info = await resolve_agent_model(
+            request.model, user_input, request_id
+        )
         
-        chat_service = await create_chat_service_for_model(request.model, model_config)
+        # 創建聊天服務
+        model_config = config_manager.get_model_by_name(actual_model)
+        if not model_config:
+            raise ValueError(f"Model '{actual_model}' not found")
+        
+        chat_service = await create_chat_service_for_model(actual_model, model_config)
         
         # 流程編號 #005: 創建Agent協調器
-        # 創建 Agent 協調器 (使用使用者選擇的模型)
+        # 創建 Agent 協調器 (使用解析後的實際模型)
         orchestrator = await create_practical_agent_orchestrator(chat_service)
         
         if not orchestrator:
@@ -559,7 +636,7 @@ async def handle_agent_mode_request(request: ChatCompletionRequest) -> ChatCompl
         response = ChatCompletionResponse(
             id=request_id,
             created=int(time.time()),
-            model=request.model,
+            model=actual_model,  # 🔑 使用實際選擇的模型
             choices=[choice],
             usage=usage
         )
@@ -568,6 +645,15 @@ async def handle_agent_mode_request(request: ChatCompletionRequest) -> ChatCompl
         conversation_history = orchestrator.get_conversation_history()
         if conversation_history:
             logger.info(f"[{request_id}] Agent 對話歷史: {len(conversation_history)} 輪交互")
+        
+        # 🔑 記錄路由資訊（如果是自動路由）
+        if request.model == "auto" and routing_info:
+            logger.info(f"[{request_id}] Agent 自動路由完成:")
+            logger.info(f"[{request_id}] - 選擇模型: {actual_model}")
+            logger.info(f"[{request_id}] - 候選模型: {candidates}")
+            logger.info(f"[{request_id}] - 意圖: {routing_info.get('intent')}")
+            logger.info(f"[{request_id}] - 信心度: {routing_info.get('confidence')}")
+            logger.info(f"[{request_id}] - 複雜度: {routing_info.get('complexity')}")
         
         logger.info(f"[{request_id}] Agent 模式處理完成")
         return response

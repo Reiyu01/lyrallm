@@ -30,14 +30,14 @@ models:
       # SLM 分析器  
       small_model:
         enabled: true
-        provider: "ollama"  # huggingface | ollama | azure_openai | openai
-        model: "gemma3:12b"
+        provider: "azure_openai"  # huggingface | ollama | azure_openai | openai
+        deployment_name: "gpt-4o"
         #deployment_name: "${AZURE_OPENAI_O3MINI_DEPLOYMENT_NAME}"
         # confidence_threshold: 0.8
         max_inference_time: 50000  # ms (120b 大模型需要更多時間，設為 60 秒(60000))
         # weight: 0.7  # 提高權重因為 O3-mini 更準確
-        temperature: 0.1  # 低溫度確保一致性
-        max_tokens: 150   # 限制回應長度
+        # temperature: 0.1  # 低溫度確保一致性
+        max_completion_tokens: 150   # 限制回應長度
         
       # 融合策略配置
       fusion:
