@@ -15,7 +15,7 @@ import hashlib
 import logging
 from typing import List
 
-from lyrallm.config.config_manager import config_manager
+from config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 

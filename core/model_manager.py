@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from enum import Enum
 
-from lyrallm.config.config_manager import config_manager
+from config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 

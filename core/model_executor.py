@@ -2,7 +2,7 @@ import time
 import logging
 import asyncio
 from typing import Optional, List, Dict, Any, Tuple
-from lyrallm.config.config_manager import config_manager
+from config.config_manager import config_manager
 from .model_manager import get_model_manager_sync
 
 import semantic_kernel as sk

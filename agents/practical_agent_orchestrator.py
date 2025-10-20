@@ -18,6 +18,7 @@ from .smart_parameter_manager import smart_settings
 # 導入新的獨立 Agent
 from .thinker_agent import ThinkerAgent
 from .search_agent import SearchAgent
+from .rag_agent import RAGAgent
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class PracticalAgentOrchestrator:
         # 初始化獨立的 Agent
         self.thinker_agent = ThinkerAgent(chat_service)
         self.search_agent = None  # 延遲初始化
+        self.rag_agent = None  # 延遲初始化
         
         # 對話歷史
         self.chat_history = ChatHistory()
@@ -37,10 +39,19 @@ class PracticalAgentOrchestrator:
         # 可用的專業能力
         self.available_capabilities = []
         
+        # 預設啟用 RAG 搜尋能力
+        rag_enabled = self.add_rag_capability()
+        if not rag_enabled:
+            logger.warning("⚠️ RAG 能力啟用失敗，將以基本模式運行")
+        
         # 對話記錄
         self.conversation_log = []
         
         logger.info("🎭 PracticalAgentOrchestrator 重構版本初始化完成")
+        if rag_enabled:
+            logger.info("🧠 RAG 搜尋能力已預設啟用")
+        else:
+            logger.info("📝 RAG 搜尋能力未啟用，可稍後手動啟用")
     
     def add_web_search_capability(self) -> bool:
         """啟用網路搜尋能力，初始化 Search Agent"""
@@ -48,11 +59,28 @@ class PracticalAgentOrchestrator:
             if self.search_agent is None:
                 self.search_agent = SearchAgent(self.chat_service)
             
-            self.available_capabilities.append("web_search")
+            if "web_search" not in self.available_capabilities:
+                self.available_capabilities.append("web_search")
+                
             logger.info("🔌 WebSearch 能力已啟用 (Search Agent 模式)")
             return True
         except Exception as e:
             logger.error(f"❌ 無法啟用 WebSearch：{e}")
+            return False
+    
+    def add_rag_capability(self) -> bool:
+        """啟用 RAG 搜尋能力，初始化 RAG Agent"""
+        try:
+            if self.rag_agent is None:
+                self.rag_agent = RAGAgent(self.chat_service)
+            
+            if "rag_search" not in self.available_capabilities:
+                self.available_capabilities.append("rag_search")
+                
+            logger.info("🧠 RAG 能力已啟用 (RAG Agent 模式)")
+            return True
+        except Exception as e:
+            logger.error(f"❌ 無法啟用 RAG：{e}")
             return False
     
 
@@ -74,7 +102,7 @@ class PracticalAgentOrchestrator:
             # 重置對話歷史為這次請求
             self.chat_history = ChatHistory()
             
-            # 確保 SearchAgent 可用（如果需要搜尋功能）
+            # 確保 Agent 可用（如果需要搜尋功能）
             if features and features.get('web_search'):
                 if "web_search" not in self.available_capabilities:
                     self.add_web_search_capability()
@@ -89,9 +117,11 @@ class PracticalAgentOrchestrator:
             
             # 直接委託 ThinkerAgent 處理整個流程
             # ThinkerAgent 將自主決定是否需要搜尋，以及如何協調
+            # 注意：即使沒有 web_search，也會傳遞 RAG agent
             final_response = await self.thinker_agent.process_user_query(
                 user_query=user_input,
-                search_agent=self.search_agent if self.search_agent else None
+                search_agent=self.search_agent if (features and features.get('web_search')) else None,
+                rag_agent=self.rag_agent if self.rag_agent else None
             )
             
             # 記錄最終回應
@@ -219,6 +249,8 @@ class PracticalAgentOrchestrator:
         """手動清理資源"""
         if self.search_agent:
             await self.search_agent.cleanup()
+        if self.rag_agent:
+            await self.rag_agent.cleanup()
 
 async def create_practical_agent_orchestrator(chat_service=None) -> Optional[PracticalAgentOrchestrator]:
     """創建實用的 Agent 協調器"""
@@ -266,7 +298,8 @@ async def create_practical_agent_orchestrator(chat_service=None) -> Optional[Pra
         # 創建協調器
         orchestrator = PracticalAgentOrchestrator(chat_service)
         
-        # 不自動添加能力，由調用方根據需求添加
+        # RAG 能力已在協調器初始化時自動啟用
+        # 不自動添加 web search 能力，由調用方根據需求添加
         # orchestrator.add_web_search_capability()  # 移除自動添加
         
         return orchestrator

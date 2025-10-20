@@ -36,12 +36,14 @@ class ThinkerAgentPlugin:
 1. **需求理解**: 用戶真正想要了解什麼？
 2. **資訊需求**: 需要哪些具體資訊來完整回答？
 3. **查詢策略**: 如何拆解查詢任務？
-4. **優先順序**: 哪些資訊最重要？
+4. **搜尋類型選擇**: 每個任務應該用網路搜尋(WEB)還是知識庫搜尋(RAG)？
+5. **優先順序**: 哪些資訊最重要？
 
 請按此格式回應：
 UNDERSTANDING: [對用戶需求的深度理解]
 INFO_NEEDED: [需要的具體資訊列表]
 SEARCH_TASKS: [具體的查詢任務，用 | 分隔]
+SEARCH_TYPES: [對應每個任務的搜尋類型：WEB|RAG，用 | 分隔]
 PRIORITY: [HIGH|MEDIUM|LOW]
 APPROACH: [處理策略：DIRECT_ANSWER 或 NEED_SEARCH]
 """
@@ -149,55 +151,181 @@ class ThinkerAgent:
         self.search_agent = search_agent
         logger.info(f"🔗 {self.name} 已連接到 SearchAgent")
     
-    async def process_user_query(self, user_query: str, search_agent=None) -> str:
+    def set_rag_agent(self, rag_agent: 'RAGAgent'):
+        """設置 RAG 代理"""
+        self.rag_agent = rag_agent
+        logger.info(f"🔗 {self.name} 已連接到 RAGAgent")
+    
+    async def process_user_query(self, user_query: str, search_agent=None, rag_agent=None) -> str:
         """
-        處理用戶查詢的主要入口點
+        處理用戶查詢的主入口點
         
         Args:
-            user_query: 用戶的問題
-            search_agent: 搜尋代理（可選）
+            user_query: 用戶查詢內容
+            search_agent: 網路搜尋代理（可選）
+            rag_agent: RAG 代理（可選）
             
         Returns:
-            完整的回答
+            str: 最終回應
         """
         try:
-            logger.info(f"🎯 {self.name} 開始處理用戶查詢")
+            logger.info(f"🧠 {self.name} 開始處理查詢: {user_query[:50]}...")
             
-            # 重置工作狀態
-            self._reset_task_state()
-            self.current_task = user_query
-            
-            # 設置搜尋代理
-            self.search_agent = search_agent
-            
-            # 確定可用工具
-            available_tools = []
+            # 設置可用的代理
             if search_agent:
-                available_tools.append("web_search")
+                self.search_agent = search_agent
+                logger.info(f"🔍 {self.name} WebSearch 代理已設定")
+            if rag_agent:
+                self.rag_agent = rag_agent
+                logger.info(f"📚 {self.name} RAG 代理已設定")
             
-            # 第一步：分析需求並制定策略
-            strategy = await self._analyze_and_plan(user_query, available_tools)
-            logger.info(f"📋 {self.name} 策略制定完成")
+            # 重置搜尋歷史
+            self.search_history = []
+            self.collected_info = {}
             
-            # 根據策略決定處理方式
-            if strategy.get('approach') == 'DIRECT_ANSWER':
-                # 直接回答
-                logger.info("💭 直接基於現有知識回答")
+            # 準備可用工具列表
+            available_tools = []
+            if self.search_agent:
+                available_tools.append("WebSearch")
+            if self.rag_agent:
+                available_tools.append("RAG")
+            
+            logger.info(f"🛠️ {self.name} 可用工具: {available_tools}")
+            
+            # 第一步：初始決策 - 是否需要 Agent 模式（僅當沒有明確工具需求時）
+            if not available_tools:
+                # 沒有任何工具可用，直接回答
+                logger.info(f"📝 {self.name} 無可用工具，直接回答")
                 return await self._provide_direct_answer(user_query)
             
-            elif strategy.get('approach') == 'NEED_SEARCH' and self.search_agent:
+            # 如果用戶明確提到 RAG、搜尋等關鍵詞，跳過初始決策
+            if self._has_explicit_tool_request(user_query):
+                logger.info(f"🎯 {self.name} 檢測到明確工具請求，跳過初始決策")
+                initial_decision = {'mode': 'AGENT_MODE', 'reason': '明確工具請求', 'confidence': 10}
+            else:
+                initial_decision = await self._make_initial_decision(user_query, available_tools)
+            
+            if initial_decision['mode'] == 'DIRECT_ANSWER':
+                logger.info(f"� {self.name} 決定直接回答，不使用特殊工具")
+                return await self._provide_direct_answer(user_query)
+            
+            # 第二步：分析和制定策略
+            strategy = await self._analyze_and_plan(user_query, available_tools)
+            
+            if strategy['approach'] == 'DIRECT_ANSWER':
+                # 不需要搜尋
+                logger.info("� 無需搜尋，提供直接回答")
+                return await self._provide_direct_answer(user_query)
+            else:
                 # 需要搜尋
-                logger.info("🔍 啟動多輪搜尋流程")
+                logger.info("� 啟動多輪搜尋流程")
                 return await self._multi_round_search_process(user_query, strategy)
             
-            else:
-                # 無搜尋工具可用，直接回答
-                logger.info("📝 無搜尋工具，提供基礎回答")
-                return await self._provide_direct_answer(user_query)
-                
         except Exception as e:
             logger.error(f"❌ {self.name} 處理查詢失敗: {e}")
             return await self._handle_error(user_query, str(e))
+
+    def _has_explicit_tool_request(self, query: str) -> bool:
+        """檢測查詢是否明確要求使用特定工具"""
+        query_lower = query.lower()
+        explicit_keywords = [
+            'rag', '查詢', '搜尋', '搜索', 'search', 
+            '知識庫', '文檔', '員工手冊', '技術規範',
+            '專案指南', '課程資訊', '常見問題'
+        ]
+        return any(keyword in query_lower for keyword in explicit_keywords)
+
+    async def _make_initial_decision(self, user_query: str, available_tools: List[str]) -> Dict[str, Any]:
+        """
+        初始決策：判斷是否真正需要 Agent 模式
+        這是新增的第一層決策，決定是否退出 Agent 模式
+        """
+        try:
+            tools_str = ", ".join(available_tools) if available_tools else "無特殊工具"
+            
+            chat_history = ChatHistory()
+            chat_history.add_user_message(f"""
+你是一個智能決策系統，需要判斷用戶的查詢是否需要使用特殊工具（如搜尋、知識庫查詢等）。
+
+用戶問題: {user_query}
+可用工具: {tools_str}
+
+**判斷標準**：
+1. 如果問題可以直接基於常識或基礎知識回答，選擇 DIRECT_ANSWER
+2. 如果需要搜尋最新資訊、特定事實、內部文檔等，選擇 AGENT_MODE
+3. 如果問題涉及計算、編程、創作等複雜任務，選擇 AGENT_MODE
+
+**特別注意**：
+- 簡單的問候、基礎概念解釋 → DIRECT_ANSWER
+- 需要查詢具體資料、最新資訊 → AGENT_MODE  
+- 明確提到「搜尋」、「查詢」、「RAG」等 → AGENT_MODE
+
+請按此格式回應：
+MODE: [DIRECT_ANSWER 或 AGENT_MODE]
+REASON: [決策理由]
+CONFIDENCE: [1-10的信心分數]
+""")
+            
+            response = await self.chat_service.get_chat_message_contents(
+                chat_history=chat_history,
+                settings=smart_settings(
+                    self.chat_service, 
+                    max_completion_tokens=500,
+                    temperature=0.1
+                )
+            )
+            
+            if not response or len(response) == 0:
+                # 預設使用 Agent 模式
+                return {'mode': 'AGENT_MODE', 'reason': '無法獲得決策，使用 Agent 模式', 'confidence': 5}
+            
+            decision_text = response[0].content
+            return self._parse_initial_decision(decision_text)
+            
+        except Exception as e:
+            logger.error(f"❌ {self.name} 初始決策失敗: {e}")
+            # 發生錯誤時預設使用 Agent 模式
+            return {'mode': 'AGENT_MODE', 'reason': f'決策錯誤: {e}', 'confidence': 3}
+
+    def _parse_initial_decision(self, decision_text: str) -> Dict[str, Any]:
+        """解析初始決策結果"""
+        import re
+        
+        decision = {
+            'mode': 'AGENT_MODE',  # 預設使用 Agent 模式
+            'reason': '未能解析決策',
+            'confidence': 5
+        }
+        
+        try:
+            # 提取 MODE
+            mode_match = re.search(r'MODE:\s*([^\n]+)', decision_text, re.IGNORECASE)
+            if mode_match:
+                mode = mode_match.group(1).strip().upper()
+                if 'DIRECT' in mode:
+                    decision['mode'] = 'DIRECT_ANSWER'
+                else:
+                    decision['mode'] = 'AGENT_MODE'
+            
+            # 提取 REASON
+            reason_match = re.search(r'REASON:\s*([^\n]+)', decision_text, re.IGNORECASE)
+            if reason_match:
+                decision['reason'] = reason_match.group(1).strip()
+            
+            # 提取 CONFIDENCE
+            confidence_match = re.search(r'CONFIDENCE:\s*([^\n]+)', decision_text, re.IGNORECASE)
+            if confidence_match:
+                try:
+                    decision['confidence'] = int(confidence_match.group(1).strip())
+                except:
+                    decision['confidence'] = 5
+            
+            logger.info(f"🎯 {self.name} 初始決策: {decision['mode']} (信心: {decision['confidence']}) - {decision['reason']}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ {self.name} 決策解析錯誤: {e}")
+        
+        return decision
     
     async def _analyze_and_plan(self, user_query: str, available_tools: List[str]) -> Dict[str, Any]:
         """分析用戶需求並制定策略"""
@@ -211,16 +339,23 @@ class ThinkerAgent:
 用戶問題: {user_query}
 可用工具: {tools_str}
 
+**重要：選擇搜尋類型的指導原則**
+- 如果用戶明確提到「RAG」、「知識庫」、「文檔」、「內部資料」、「員工手冊」、「技術規範」、「專案指南」、「課程資訊」、「FAQ」等關鍵詞，應優先使用 RAG 搜尋
+- 如果問題涉及公司內部政策、流程、技術標準、員工培訓等內容，應使用 RAG 搜尋
+- 如果需要最新資訊、新聞、實時數據、網路資源，應使用 WEB 搜尋
+- 當不確定時，如果有 RAG 工具可用，優先嘗試 RAG 搜尋
+
 請進行以下分析：
 1. **需求理解**: 用戶真正想要了解什麼？
-2. **資訊需求**: 需要哪些具體資訊來完整回答？
+2. **資訊來源判斷**: 這個問題更可能在內部文檔還是網路上找到答案？
 3. **查詢策略**: 如何拆解查詢任務？
-4. **優先順序**: 哪些資訊最重要？
+4. **搜尋類型選擇**: 每個任務應該用網路搜尋(WEB)還是知識庫搜尋(RAG)？
 
 請按此格式回應：
 UNDERSTANDING: [對用戶需求的深度理解]
-INFO_NEEDED: [需要的具體資訊列表]
+INFO_SOURCE: [資訊來源判斷：INTERNAL_DOCS|EXTERNAL_WEB|MIXED]
 SEARCH_TASKS: [具體的查詢任務，用 | 分隔]
+SEARCH_TYPES: [對應每個任務的搜尋類型：WEB|RAG，用 | 分隔]
 PRIORITY: [HIGH|MEDIUM|LOW]
 APPROACH: [處理策略：DIRECT_ANSWER 或 NEED_SEARCH]
 """)
@@ -249,13 +384,24 @@ APPROACH: [處理策略：DIRECT_ANSWER 或 NEED_SEARCH]
         try:
             max_rounds = 5  # 最多搜尋輪數
             search_tasks = strategy.get('tasks', [user_query])
+            # 智能預設搜尋類型
+            default_search_types = []
+            for task in search_tasks:
+                # 檢查任務內容，智能選擇搜尋類型
+                if self._should_use_rag(task):
+                    default_search_types.append('RAG')
+                else:
+                    default_search_types.append('RAG' if self.rag_agent else 'WEB')
+            
+            search_types = strategy.get('search_types', default_search_types)
             
             for round_num in range(max_rounds):
-                logger.info(f"� {self.name} 第 {round_num + 1} 輪搜尋")
+                logger.info(f"🔄 {self.name} 第 {round_num + 1} 輪搜尋")
                 
                 # 執行當前輪次的搜尋
                 current_task = search_tasks[0] if search_tasks else user_query
-                search_result = await self._execute_search(current_task)
+                current_type = search_types[0] if search_types else ('RAG' if self.rag_agent else 'WEB')
+                search_result = await self._execute_search(current_task, current_type)
                 
                 # 記錄搜尋結果
                 self.search_history.append({
@@ -264,17 +410,38 @@ APPROACH: [處理策略：DIRECT_ANSWER 或 NEED_SEARCH]
                     'result': search_result
                 })
                 
-                # 評估是否需要更多搜尋
-                need_more = await self._evaluate_completeness(user_query, search_result)
-                
-                if not need_more['need_more']:
-                    logger.info(f"✅ {self.name} 資訊收集完成")
+                # 簡化評估：對於明確的工具請求，一次搜尋通常足夠
+                if self._has_explicit_tool_request(user_query) and round_num == 0:
+                    logger.info(f"✅ {self.name} 明確工具請求完成，跳過多輪評估")
                     break
-                    
-                # 準備下一輪搜尋
-                if need_more.get('next_query'):
-                    search_tasks = [need_more['next_query']]
+                
+                # 評估是否需要更多搜尋（僅對複雜查詢且非最後一輪）
+                if round_num < max_rounds - 1 and len(search_tasks) > 1:
+                    try:
+                        need_more = await self._evaluate_completeness(user_query, search_result)
+                        
+                        if not need_more['need_more']:
+                            logger.info(f"✅ {self.name} 資訊收集完成")
+                            break
+                            
+                        # 準備下一輪搜尋
+                        if need_more.get('next_query'):
+                            search_tasks = [need_more['next_query']]
+                            search_types = [search_types[0] if search_types else ('RAG' if self.rag_agent else 'WEB')]
+                        elif search_tasks and search_types:
+                            # 移除已完成的任務
+                            search_tasks.pop(0)
+                            search_types.pop(0)
+                            
+                            if not search_tasks:
+                                break
+                        else:
+                            break
+                    except Exception as e:
+                        logger.warning(f"⚠️ {self.name} 完整性評估失敗，繼續處理: {e}")
+                        break
                 else:
+                    # 單次搜尋或達到最大輪數
                     break
             
             # 整合所有資訊並生成最終回答
@@ -284,16 +451,36 @@ APPROACH: [處理策略：DIRECT_ANSWER 或 NEED_SEARCH]
             logger.error(f"❌ {self.name} 多輪搜尋失敗: {e}")
             return await self._handle_error(user_query, str(e))
     
-    async def _execute_search(self, query: str) -> Dict[str, Any]:
+    async def _execute_search(self, query: str, search_type: str = "WEB") -> Dict[str, Any]:
         """執行搜尋任務"""
-        if not self.search_agent:
-            raise ValueError("Search Agent 不可用")
+        search_type = search_type.upper()
         
-        logger.info(f"🔍 執行搜尋: {query}")
-        search_result = await self.search_agent.execute_search(query)
+        if search_type == "RAG" and self.rag_agent:
+            logger.info(f"🧠 執行 RAG 搜尋: {query}")
+            search_result = await self.rag_agent.execute_rag_search(query)
+        elif search_type == "WEB" and self.search_agent:
+            logger.info(f"🔍 執行網路搜尋: {query}")
+            search_result = await self.search_agent.execute_search(query)
+        else:
+            # 智能降級處理
+            if search_type == "RAG" and not self.rag_agent and self.search_agent:
+                logger.warning(f"⚠️ RAG 不可用，降級為網路搜尋: {query}")
+                search_result = await self.search_agent.execute_search(query)
+            elif search_type == "WEB" and not self.search_agent and self.rag_agent:
+                logger.warning(f"⚠️ 網路搜尋不可用，降級為 RAG 搜尋: {query}")
+                search_result = await self.rag_agent.execute_rag_search(query)
+            elif self.rag_agent:
+                logger.info(f"🧠 使用 RAG 搜尋: {query}")
+                search_result = await self.rag_agent.execute_rag_search(query)
+            elif self.search_agent:
+                logger.warning(f"⚠️ RAG 不可用，使用網路搜尋: {query}")
+                search_result = await self.search_agent.execute_search(query)
+            else:
+                raise ValueError("沒有可用的搜尋代理")
         
         # 記錄到收集的資訊中
         timestamp = len(self.search_history) + 1
+        search_result['search_type'] = search_type
         self.collected_info[f"search_{timestamp}"] = search_result
         
         return search_result
@@ -351,53 +538,75 @@ NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
     async def _generate_final_answer(self, user_query: str) -> str:
         """生成最終整合回答"""
         try:
-            # 整理所有搜尋資料
+            # 整理所有搜尋資料（優化 RAG 結果處理）
             all_data = []
+            total_length = 0
+            max_context_length = 8000  # 限制 context 大小
+            
             for i, search_record in enumerate(self.search_history):
-                all_data.append(f"""
-搜尋 {i+1} - 查詢: {search_record['query']}
-結果: {search_record['result']}
-""")
+                # 智能提取搜尋結果中的有用資訊
+                result_data = search_record.get('result', {})
+                
+                # 提取實際的搜尋內容
+                extracted_content = self._extract_search_content(result_data)
+                
+                data_chunk = f"搜尋 {i+1}: {search_record['query']}\n內容: {extracted_content}\n"
+                
+                if total_length + len(data_chunk) > max_context_length:
+                    break
+                    
+                all_data.append(data_chunk)
+                total_length += len(data_chunk)
             
             all_search_data = "\n".join(all_data)
             
+            # 如果沒有搜尋資料，直接使用基礎回答
+            if not all_search_data.strip():
+                logger.warning(f"⚠️ {self.name} 沒有有效的搜尋資料，使用直接回答")
+                return await self._provide_direct_answer(user_query)
+            
             chat_history = ChatHistory()
             chat_history.add_user_message(f"""
-你是一個專業的資訊助理，需要根據搜集到的資料，直接回答用戶的問題。
+你是一個專業的助理，根據搜集到的資料直接回答用戶問題。
 
-用戶原始問題: {user_query}
-搜集到的相關資料: {all_search_data}
+用戶問題: {user_query}
 
-請直接針對用戶的問題提供有用的回答：
+搜尋到的相關資料:
+{all_search_data}
 
-**重要指導原則：**
-1. 針對用戶的需求來回應，不要說明你是如何分析的
-2. 以自然、友好的語調回應，就像一個知識豐富的朋友在回答
-3. 重點提供實用資訊，而不是分析過程
-4. 如果是新聞查詢，提供具體的新聞內容和重點
-5. 如果是資訊查詢，提供準確的事實和有用的建議
-6. 若有參考資訊，如網址或是文件時，請附上資料來源
-7. 避免使用「根據搜尋結果」、「資料顯示」等分析性語言
-8. 讓回答看起來像是你本身就知道這些資訊
+請根據上述資料回答用戶的問題：
 
-**回答格式：**
-- 針對使用者需求回答主要問題
-- 提供相關的詳細資訊
-- 給出實用的建議或下一步行動（如適用）
+**如果資料來自網路搜尋：**
+- 整理和總結搜尋到的最新資訊
+- 提供具體的新聞、數據或事實
+- 以清晰的結構呈現信息
+- 注明資訊的時效性和來源可靠性
 
-請以自然、直接的方式回答，讓用戶感覺得到了有價值的幫助。
-- 基於最新資訊
-- 直接回應用戶需求
+**如果資料來自企業知識庫：**
+- 直接引用相關的政策、規範或指引
+- 提供具體的內部流程或標準
+- 如果資料中包含具體的步驟，請詳細說明
+
+**通用要求：**
+- 以友好自然的語調回應
+- 提供具體實用的資訊
+- 基於搜尋到的實際資料給出準確的回答
+- 如果搜尋結果不夠完整，請如實說明
+
+重要：請確保回答內容來自於提供的搜尋資料，不要編造資訊。
 """)
             
             response = await self.chat_service.get_chat_message_contents(
                 chat_history=chat_history,
                 settings=smart_settings(
                     self.chat_service, 
-                    max_completion_tokens=3000,
+                    max_completion_tokens=2000,
                     temperature=0.7
                 )
             )
+            
+            # 添加短暫延遲以避免 API 速率限制
+            await asyncio.sleep(0.5)
             
             if not response or len(response) == 0:
                 raise ValueError("未能生成最終回答")
@@ -410,6 +619,99 @@ NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
             logger.error(f"❌ {self.name} 最終回答生成失敗: {e}")
             return await self._handle_error(user_query, str(e))
     
+    def _extract_search_content(self, result_data: Dict[str, Any]) -> str:
+        """智能提取搜尋結果中的有用內容"""
+        try:
+            if isinstance(result_data, dict):
+                # 1. 檢查是否是 Web Search 結果格式
+                if result_data.get('success') is not None and 'raw_results' in result_data:
+                    # Web Search Agent 的返回格式
+                    if result_data.get('success'):
+                        raw_results = result_data.get('raw_results', '')
+                        sources = result_data.get('sources', [])
+                        query_used = result_data.get('query_used', '')
+                        
+                        content_parts = []
+                        if query_used:
+                            content_parts.append(f"搜索關鍵字: {query_used}")
+                        
+                        if raw_results:
+                            # 限制內容長度避免過長
+                            if len(raw_results) > 2000:
+                                raw_results = raw_results[:2000] + "...[內容截斷]"
+                            content_parts.append(f"搜索結果:\n{raw_results}")
+                        
+                        if sources:
+                            sources_str = "\n".join(sources[:5])  # 最多顯示5個來源
+                            content_parts.append(f"資料來源:\n{sources_str}")
+                        
+                        return "\n\n".join(content_parts)
+                    else:
+                        # Web Search 失敗
+                        error_msg = result_data.get('error', '未知錯誤')
+                        return f"網路搜索失敗: {error_msg}"
+                
+                # 2. 檢查是否是 RAG 搜尋結果格式
+                elif 'analyzed_results' in result_data or 'search_results' in result_data:
+                    # RAG Agent 的返回格式
+                    # 優先嘗試提取 analyzed_results 中的關鍵資訊
+                    analyzed_results = result_data.get('analyzed_results', {})
+                    if analyzed_results and isinstance(analyzed_results, dict):
+                        key_info = analyzed_results.get('key_information', '')
+                        summary = analyzed_results.get('summary', '')
+                        if key_info and key_info != '':
+                            content = f"關鍵資訊: {key_info}"
+                            if summary and summary != '':
+                                content += f"\n摘要: {summary}"
+                            return content
+                    
+                    # 嘗試提取搜尋結果中的文本內容
+                    search_results = result_data.get('search_results', [])
+                    if search_results and isinstance(search_results, list):
+                        extracted_texts = []
+                        for i, result in enumerate(search_results[:3]):  # 只取前3個結果
+                            if isinstance(result, dict):
+                                text = result.get('text', '')
+                                if text:
+                                    # 截斷過長的文本
+                                    if len(text) > 500:
+                                        text = text[:500] + "..."
+                                    extracted_texts.append(f"文檔 {i+1}: {text}")
+                        
+                        if extracted_texts:
+                            return "\n".join(extracted_texts)
+                    
+                    # RAG 的成功/失敗資訊
+                    if result_data.get('success'):
+                        return f"RAG 搜尋成功，找到 {len(search_results)} 個相關文檔"
+                    elif result_data.get('error'):
+                        return f"RAG 搜尋遇到問題: {result_data.get('error')}"
+                
+                # 3. 其他格式的字典，嘗試提取有用信息
+                else:
+                    # 嘗試找到包含實際內容的字段
+                    content_fields = ['content', 'result', 'text', 'data', 'response']
+                    for field in content_fields:
+                        if field in result_data and result_data[field]:
+                            content = str(result_data[field])
+                            if len(content) > 1000:
+                                content = content[:1000] + "...[內容截斷]"
+                            return content
+            
+            # 如果是其他格式，轉為字符串並截斷
+            result_str = str(result_data)
+            if len(result_str) > 1000:
+                result_str = result_str[:1000] + "...[內容截斷]"
+            return result_str
+            
+        except Exception as e:
+            logger.warning(f"⚠️ {self.name} 提取搜尋內容失敗: {e}")
+            # 降級處理
+            result_str = str(result_data)
+            if len(result_str) > 500:
+                result_str = result_str[:500] + "...[提取失敗]"
+            return result_str
+
     async def _provide_direct_answer(self, user_query: str) -> str:
         """提供直接回答（無需搜尋）"""
         try:
@@ -446,6 +748,22 @@ NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
         except Exception as e:
             logger.error(f"❌ {self.name} 直接回答失敗: {e}")
             return f"抱歉，處理您的請求時發生錯誤：{str(e)}"
+
+    def _should_use_rag(self, query: str) -> bool:
+        """智能判斷是否應該使用 RAG 搜尋"""
+        if not self.rag_agent:
+            return False
+            
+        # RAG 關鍵詞
+        rag_keywords = [
+            'rag', '知識庫', '文檔', '內部資料', '員工手冊', '技術規範', 
+            '專案指南', '課程資訊', 'faq', '常見問題', '公司政策', 
+            '流程', '標準', '培訓', '規範', '指南', '手冊', '政策',
+            '內部', '公司', '組織', '部門', '員工', '工作'
+        ]
+        
+        query_lower = query.lower()
+        return any(keyword in query_lower for keyword in rag_keywords)
     
     def _parse_strategy(self, strategy_text: str) -> Dict[str, Any]:
         """解析策略分析結果"""
@@ -454,6 +772,7 @@ NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
         strategy = {
             'approach': 'DIRECT_ANSWER',
             'tasks': [],
+            'search_types': [],
             'priority': 'MEDIUM',
             'understanding': '',
             'info_needed': ''
@@ -471,6 +790,24 @@ NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
             if tasks_match:
                 tasks_str = tasks_match.group(1).strip()
                 strategy['tasks'] = [task.strip() for task in tasks_str.split('|') if task.strip()]
+            
+            # 提取 SEARCH_TYPES
+            types_match = re.search(r'SEARCH_TYPES:\s*([^\n]+)', strategy_text, re.IGNORECASE)
+            if types_match:
+                types_str = types_match.group(1).strip()
+                strategy['search_types'] = [t.strip().upper() for t in types_str.split('|') if t.strip()]
+                # 確保搜尋類型數量與任務數量一致
+                while len(strategy['search_types']) < len(strategy['tasks']):
+                    # 智能預設：如果有 RAG 可用，優先使用 RAG，否則使用 WEB
+                    default_type = 'RAG' if self.rag_agent else 'WEB'
+                    strategy['search_types'].append(default_type)
+            else:
+                # 如果沒有明確指定搜尋類型，根據可用工具智能選擇
+                strategy['search_types'] = []
+                for _ in strategy['tasks']:
+                    # 預設策略：有 RAG 優先用 RAG，沒有才用 WEB
+                    default_type = 'RAG' if self.rag_agent else 'WEB'
+                    strategy['search_types'].append(default_type)
             
             # 提取其他資訊
             priority_match = re.search(r'PRIORITY:\s*([^\n]+)', strategy_text, re.IGNORECASE)

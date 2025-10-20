@@ -4,7 +4,7 @@ Uses a shared AsyncElasticsearch client (es_client.get_es_client) and reads
 endpoint/index/dims from config_manager.vectordb or storages.elasticsearch.
 """
 from typing import List, Dict, Any, Optional
-from lyrallm.config.config_manager import config_manager
+from config.config_manager import config_manager
 from .es_client import get_es_client, get_es_index
 import logging
 
