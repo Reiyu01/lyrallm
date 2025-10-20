@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import yaml
 from pathlib import Path
 
-from lyrallm.config.config_manager import config_manager
+from config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 

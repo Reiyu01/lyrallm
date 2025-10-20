@@ -723,27 +723,23 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         if request.features:
             logger.info(f"[{request_id}] Features 內容: web_search={request.features.web_search}, image_generation={request.features.image_generation}, code_interpreter={request.features.code_interpreter}")
         
-        # 流程編號 #002: 模式決策點 - 判斷使用Agent模式或直接模式
-        # 根據前端傳來的features參數決定處理方式
-        agent_mode_enabled = False
+        # 流程編號 #002: 模式決策點 - 總是進入 Agent 模式進行智能決策
+        # 修改：總是進入 Agent 模式，由 ThinkerAgent 決定是否需要特殊功能
+        agent_mode_enabled = True  # 改為總是啟用 Agent 模式
+        
+        # 解析前端功能設定
+        features_dict = {}
         if request.features:
-            # 檢查是否有任何功能啟用
-            agent_mode_enabled = (request.features.web_search or 
-                                request.features.image_generation or 
-                                request.features.code_interpreter)
-            
-            if agent_mode_enabled:
-                logger.info(f"[{request_id}] 偵測到 features 參數，進入 Agent 模式")
-                enabled_features = []
-                if request.features.web_search:
-                    enabled_features.append("web_search")
-                if request.features.image_generation:
-                    enabled_features.append("image_generation")
-                if request.features.code_interpreter:
-                    enabled_features.append("code_interpreter")
-                logger.info(f"[{request_id}] 啟用功能: {enabled_features}")
+            features_dict = {
+                'web_search': request.features.web_search,
+                'image_generation': request.features.image_generation,
+                'code_interpreter': request.features.code_interpreter
+            }
+            logger.info(f"[{request_id}] 前端指定功能: {features_dict}")
         else:
-            logger.info(f"[{request_id}] 前端未指定功能，使用基本聊天模式")
+            logger.info(f"[{request_id}] 前端未指定功能，由 ThinkerAgent 自主決策")
+        
+        logger.info(f"[{request_id}] 進入 Agent 模式進行智能決策")
         
         # 流程編號 #003A: Agent模式分支 - 進入多Agent協作流程
         # 當啟用任何特殊功能時走此分支

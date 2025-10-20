@@ -1,6 +1,7 @@
 """
 基於 Semantic Kernel 1.37.0 的實用 Agent 架構
 使用現有功能實現智能多 Agent 協作
+重構版本：使用獨立的 Thinker Agent 和 Search Agent
 """
 
 import asyncio
@@ -8,20 +9,29 @@ import logging
 from typing import Dict, Any, List, Optional
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatCompletion
-from semantic_kernel.functions import kernel_function
+from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
 from semantic_kernel.contents.chat_message_content import ChatMessageContent
 from semantic_kernel.contents.chat_history import ChatHistory
-from lyrallm.config.config_manager import config_manager
+from config.config_manager import config_manager
+from .smart_parameter_manager import smart_settings
+
+# 導入新的獨立 Agent
+from .thinker_agent import ThinkerAgent
+from .search_agent import SearchAgent
+from .rag_agent import RAGAgent
 
 logger = logging.getLogger(__name__)
 
 class PracticalAgentOrchestrator:
-    """實用的 Agent 協調器，基於 Semantic Kernel 基礎功能"""
+    """實用的 Agent 協調器，基於 Semantic Kernel 基礎功能 - 重構版本"""
     
-    def __init__(self, chat_service):
+    def __init__(self, chat_service: ChatCompletionClientBase):
         self.chat_service = chat_service
-        self.kernel = Kernel()
-        self.kernel.add_service(chat_service)
+        
+        # 初始化獨立的 Agent
+        self.thinker_agent = ThinkerAgent(chat_service)
+        self.search_agent = None  # 延遲初始化
+        self.rag_agent = None  # 延遲初始化
         
         # 對話歷史
         self.chat_history = ChatHistory()
@@ -29,281 +39,179 @@ class PracticalAgentOrchestrator:
         # 可用的專業能力
         self.available_capabilities = []
         
+        # 預設啟用 RAG 搜尋能力
+        rag_enabled = self.add_rag_capability()
+        if not rag_enabled:
+            logger.warning("⚠️ RAG 能力啟用失敗，將以基本模式運行")
+        
         # 對話記錄
         self.conversation_log = []
         
-        logger.info("🎭 PracticalAgentOrchestrator 初始化完成")
+        logger.info("🎭 PracticalAgentOrchestrator 重構版本初始化完成")
+        if rag_enabled:
+            logger.info("🧠 RAG 搜尋能力已預設啟用")
+        else:
+            logger.info("📝 RAG 搜尋能力未啟用，可稍後手動啟用")
     
     def add_web_search_capability(self) -> bool:
-        """僅使用 MCP 方式啟用網路搜尋能力（不保留 Plugin）。"""
+        """啟用網路搜尋能力，初始化 Search Agent"""
         try:
-            from lyrallm.mcp.web_search_mcp_client import WebSearchMCPClient  # type: ignore
-            self.mcp_client = WebSearchMCPClient()
-            self.available_capabilities.append("web_search")
-            self.web_search_via = "mcp"
-            logger.info("🔌 WebSearch 能力已啟用（MCP 模式）")
+            if self.search_agent is None:
+                self.search_agent = SearchAgent(self.chat_service)
+            
+            if "web_search" not in self.available_capabilities:
+                self.available_capabilities.append("web_search")
+                
+            logger.info("🔌 WebSearch 能力已啟用 (Search Agent 模式)")
             return True
-        except Exception as mcp_err:
-            logger.error(f"❌ 無法啟用 WebSearch（MCP）：{mcp_err}")
+        except Exception as e:
+            logger.error(f"❌ 無法啟用 WebSearch：{e}")
             return False
     
-    @kernel_function(
-        description="智能任務分析和決策",
-        name="analyze_and_decide"
-    )
-    def analyze_and_decide(self, user_input: str, capabilities: str) -> str:
-        """智能分析用戶請求並決定處理策略"""
-        
-        prompt = f"""
-你是一個智能任務協調者 (Thinker Agent)，需要分析用戶請求並選擇最佳的處理方式。
+    def add_rag_capability(self) -> bool:
+        """啟用 RAG 搜尋能力，初始化 RAG Agent"""
+        try:
+            if self.rag_agent is None:
+                self.rag_agent = RAGAgent(self.chat_service)
+            
+            if "rag_search" not in self.available_capabilities:
+                self.available_capabilities.append("rag_search")
+                
+            logger.info("🧠 RAG 能力已啟用 (RAG Agent 模式)")
+            return True
+        except Exception as e:
+            logger.error(f"❌ 無法啟用 RAG：{e}")
+            return False
+    
 
-可用能力: {capabilities}
-
-用戶請求: {user_input}
-
-分析任務並決定：
-1. 這個請求是否需要使用特殊能力？
-2. 如果需要，應該使用哪種能力？
-3. 如何最好地回應用戶？
-
-請按此格式回應：
-ANALYSIS: [對請求的分析]
-DECISION: [DIRECT|WEB_SEARCH]
-REASON: [決策理由]
-APPROACH: [具體處理方法]
-"""
-        return prompt
     
     async def process_request(self, user_input: str, features: Dict[str, Any] = None) -> str:
         """
-        流程編號 #008: Agent協調器主處理流程入口
-        處理用戶請求，智能選擇處理方式
+        處理用戶請求 - 使用 ThinkerAgent 作為主控制器
+        
+        新的流程：
+        1. ThinkerAgent 接管主控制權
+        2. 自主決定是否需要搜尋以及搜尋策略  
+        3. 協調多輪搜尋任務
+        4. 生成最終整合回應
         """
         try:
+            logger.info(f"🎬 開始處理請求")
+            logger.info(f"📋 委託 ThinkerAgent 作為主控制器")
+            
             # 重置對話歷史為這次請求
             self.chat_history = ChatHistory()
             
-            # 流程編號 #009: 確定活躍能力 - 根據features決定可用功能
-            # 根據功能參數確定可用能力
-            active_capabilities = []
-            if features and features.get('web_search') and "web_search" in self.available_capabilities:
-                active_capabilities.append("web_search")
+            # 確保 Agent 可用（如果需要搜尋功能）
+            if features and features.get('web_search'):
+                if "web_search" not in self.available_capabilities:
+                    self.add_web_search_capability()
             
             # 記錄請求
             self.conversation_log.append({
-                "type": "user_request",
+                "type": "user_request", 
                 "content": user_input,
                 "features": features,
-                "capabilities": active_capabilities
+                "mode": "thinker_agent_controller"
             })
             
-                        # 流程編號 #010A: 直接處理分支 - 沒有特殊能力時直接回答
-            # 如果沒有特殊能力，直接處理
-            if not active_capabilities:
-                logger.info("📝 Thinker 直接處理請求")
-                result = await self._direct_response(user_input)
-                self._log_response("thinker_direct", result)
-                return result
-            
-            # 流程編號 #011: Thinker分析階段 - 智能分析用戶請求
-            # 使用 Thinker 分析並決策
-            logger.info(f"🧠 Thinker 分析請求，可用能力: {active_capabilities}")
-            
-            decision_prompt = self.analyze_and_decide(
-                user_input=user_input,
-                capabilities=", ".join(active_capabilities)
+            # 直接委託 ThinkerAgent 處理整個流程
+            # ThinkerAgent 將自主決定是否需要搜尋，以及如何協調
+            # 注意：即使沒有 web_search，也會傳遞 RAG agent
+            final_response = await self.thinker_agent.process_user_query(
+                user_query=user_input,
+                search_agent=self.search_agent if (features and features.get('web_search')) else None,
+                rag_agent=self.rag_agent if self.rag_agent else None
             )
             
-            decision_result = await self._invoke_with_prompt(decision_prompt)
-            self._log_response("thinker_analysis", decision_result)
+            # 記錄最終回應
+            self._log_response("thinker_agent_final", final_response)
             
-            logger.info(f"🤔 Thinker 決策: {decision_result[:150]}...")
+            logger.info(f"✅ 請求處理完成 (ThinkerAgent 控制模式)")
+            return final_response
             
-            # 流程編號 #012: 決策分支點 - 根據Thinker分析選擇處理方式
-            # 根據決策選擇處理方式
-            if "DECISION: WEB_SEARCH" in decision_result and "web_search" in active_capabilities:
-                # 流程編號 #013A: WebSearch分支 - 啟動網路搜尋流程
-                logger.info("🔍 使用 WebSearch 能力")
-                result = await self._use_web_search(user_input, decision_result)
-                self._log_response("web_search_agent", result)
-                return result
-            else:
-                # 流程編號 #013B: 直接回答分支 - 使用現有知識回答
-                logger.info("📝 Thinker 提供直接回應")
-                result = await self._extract_or_generate_response(decision_result, user_input)
-                self._log_response("thinker_response", result)
-                return result
-                
         except Exception as e:
             logger.error(f"❌ 處理請求失敗: {e}")
-            error_response = f"抱歉，處理您的請求時發生錯誤。我會嘗試基於現有知識回答您的問題。\n\n{await self._direct_response(user_input)}"
-            self._log_response("error_fallback", error_response)
-            return error_response
+            
+            # 提供更詳細的錯誤回退
+            try:
+                fallback_response = await self._direct_response_fallback(user_input)
+                self._log_response("error_fallback", fallback_response)
+                return fallback_response
+            except Exception as fallback_error:
+                logger.error(f"❌ 錯誤回退也失敗: {fallback_error}")
+                return f"""抱歉，處理您的請求時發生錯誤。
+
+錯誤詳情：{str(e)}
+
+建議：
+1. 請稍後再試
+2. 嘗試重新表述您的問題
+3. 檢查問題是否過於複雜
+
+如果問題持續存在，請聯繫技術支援。"""
     
-    async def _direct_response(self, user_input: str) -> str:
-        """直接回應用戶請求"""
-        prompt = f"""
-請針對以下問題提供清晰、準確且有幫助的回答：
+    async def _direct_response_fallback(self, user_input: str) -> str:
+        """錯誤時的回退回應方法"""
+        try:
+            # 嘗試使用基本的聊天服務直接回應
+            chat_history = ChatHistory()
+            chat_history.add_user_message(f"""請基於您的知識回答以下問題：
 
 {user_input}
 
-請確保回答：
-- 基於可靠的知識
-- 結構清晰
-- 實用且具體
-"""
-        return await self._invoke_with_prompt(prompt)
-    
-    async def _use_web_search(self, user_input: str, analysis: str) -> str:
-        """
-        流程編號 #014: WebSearch處理流程入口
-        使用 WebSearch 能力處理請求
-        """
-        try:
-            # 流程編號 #015: MCP客戶端初始化檢查
-            # 確保 MCP 客戶端啟動
-            if getattr(self, "web_search_via", None) != "mcp":
-                raise RuntimeError("WebSearch 未以 MCP 啟用")
-            if not hasattr(self, "mcp_client"):
-                from lyrallm.mcp.web_search_mcp_client import WebSearchMCPClient  # lazy import
-                self.mcp_client = WebSearchMCPClient()
-            if not getattr(self, "_mcp_started", False):
-                await self.mcp_client.start()
-                self._mcp_started = True
+如果您不確定某些資訊，請說明哪些部分可能需要最新的網路搜尋來確認。""")
             
-            # 流程編號 #016: 時間獲取 - 取得當前時間優化搜尋
-            # 先獲取當前時間，用於優化搜尋
-            current_time_result = await self.mcp_client.get_current_time("readable")
-            logger.info(f"📅 獲取當前時間: {current_time_result}")
-            
-            # 流程編號 #017: 搜尋規劃 - 基於時間和分析準備搜尋關鍵詞
-            # 準備搜尋查詢，包含時間資訊
-            search_preparation_prompt = f"""
-基於以下分析和用戶請求，準備進行網路搜尋：
-
-用戶請求: {user_input}
-分析結果: {analysis}
-當前時間: {current_time_result}
-
-請提供：
-1. 最佳的搜尋關鍵字（如果用戶要求最新資訊，請在關鍵字中包含時間相關詞彙）
-2. 搜尋後需要重點關注的資訊
-
-格式：
-KEYWORDS: [搜尋關鍵字]
-FOCUS: [重點關注的資訊類型]
-"""
-            
-            search_plan = await self._invoke_with_prompt(search_preparation_prompt)
-            logger.info(f"🎯 搜尋計劃: {search_plan[:100]}...")
-            
-            # 流程編號 #018: 關鍵詞提取 - 從搜尋計劃提取最佳關鍵詞
-            # 從搜尋計劃中提取關鍵字
-            import re
-            keywords_match = re.search(r'KEYWORDS:\s*([^\n]+)', search_plan)
-            if keywords_match:
-                search_keywords = keywords_match.group(1).strip()
-                logger.info(f"🔍 使用搜尋關鍵字: {search_keywords}")
-            else:
-                search_keywords = user_input
-                logger.info(f"🔍 使用原始請求作為搜尋關鍵字: {search_keywords}")
-            
-            # 流程編號 #019: MCP搜尋執行 - 調用MCP客戶端執行搜尋
-            # 執行網路搜尋
-            search_result_str = await self.mcp_client.search(query=search_keywords, max_results=5)
-            logger.info("✅ MCP 網路搜尋完成")
-            
-            # 流程編號 #020: 結果分析合成 - 分析搜尋結果並生成回答
-            # 分析和總結搜尋結果
-            synthesis_prompt = f"""
-基於網路搜尋結果，為用戶提供綜合性回答：
-
-原始請求: {user_input}
-當前時間: {current_time_result}
-搜尋結果: {search_result_str}
-
-請提供：
-1. 清晰的總結
-2. 重要發現
-3. 相關建議或見解
-4. 如果適用，提及資訊來源的時效性
-
-請確保回答結構清晰、資訊準確且對用戶有價值。
-"""
-                
-            final_response = await self._invoke_with_prompt(synthesis_prompt)
-            return final_response
-                
-        except Exception as search_error:
-            logger.error(f"❌ 網路搜尋失敗: {search_error}")
-            # 回退到直接回答
-            fallback_prompt = f"""
-無法進行網路搜尋，請基於現有知識盡可能回答：
-
-{user_input}
-
-請說明：
-1. 基於已知資訊的回答
-2. 哪些資訊可能需要最新的網路搜尋
-3. 建議用戶如何獲取最新資訊
-"""
-            return await self._invoke_with_prompt(fallback_prompt)
-                
-        except Exception as e:
-            logger.error(f"❌ WebSearch 流程失敗: {e}")
-            return await self._direct_response(user_input)
-    
-    async def _extract_or_generate_response(self, decision_result: str, original_request: str) -> str:
-        """從決策結果中提取回應或生成新回應"""
-        try:
-            # 如果決策結果中包含了回應，嘗試提取
-            if "APPROACH:" in decision_result:
-                approach_section = decision_result.split("APPROACH:")[1].strip()
-                if len(approach_section) > 50:  # 如果有足夠的內容
-                    return approach_section
-            
-            # 否則生成新的回應
-            response_prompt = f"""
-基於以下分析，為用戶提供最終回答：
-
-分析結果: {decision_result}
-
-原始請求: {original_request}
-
-請提供清晰、完整的回答。
-"""
-            return await self._invoke_with_prompt(response_prompt)
-            
-        except Exception as e:
-            logger.error(f"❌ 回應生成失敗: {e}")
-            return await self._direct_response(original_request)
-    
-    async def _invoke_with_prompt(self, prompt: str) -> str:
-        """使用 prompt 調用語言模型"""
-        try:
-            # 添加用戶訊息
-            self.chat_history.add_user_message(prompt)
-            
-            # 獲取回應
             response = await self.chat_service.get_chat_message_contents(
-                chat_history=self.chat_history,
-                settings=self.chat_service.get_prompt_execution_settings_class()(
-                    max_tokens=2000,
+                chat_history=chat_history,
+                settings=smart_settings(
+                    self.chat_service, 
+                    max_completion_tokens=2000,
                     temperature=0.7
                 )
             )
             
             if response and len(response) > 0:
-                content = response[0].content
-                # 添加回應到歷史
-                self.chat_history.add_assistant_message(content)
-                return content
+                return f"⚠️ 系統暫時無法進行完整分析，以下是基於現有知識的回答：\n\n{response[0].content}"
             else:
-                return "未能獲得有效回應"
+                return "抱歉，系統暫時無法回應您的請求，請稍後再試。"
                 
         except Exception as e:
-            logger.error(f"❌ 模型調用失敗: {e}")
-            return f"語言模型調用失敗：{str(e)}"
+            logger.error(f"❌ 回退回應失敗: {e}")
+            return "抱歉，系統暫時不可用，請稍後再試或聯繫技術支援。"
+    
+    async def _direct_response(self, user_input: str) -> str:
+        """直接回應用戶請求 - 使用 Thinker Agent"""
+        decision_info = await self.thinker_agent.process_request(user_input, [])
+        return decision_info['response']
+    
+    async def _use_search_agent(self, user_input: str, analysis: str) -> str:
+        """
+        流程編號 #014: WebSearch處理流程入口
+        使用 Search Agent 處理請求
+        """
+        try:
+            if self.search_agent is None:
+                raise RuntimeError("Search Agent 未初始化")
+            
+            # 使用 Search Agent 執行搜尋和分析
+            result = await self.search_agent.search_and_analyze(user_input, analysis)
+            return result
+                
+        except Exception as e:
+            logger.error(f"❌ Search Agent 處理失敗: {e}")
+            return await self._direct_response(user_input)
+    
+    async def _extract_or_generate_response(self, decision_result: str, original_request: str) -> str:
+        """從決策結果中提取回應或生成新回應 - 使用 Thinker Agent"""
+        try:
+            decision_info = await self.thinker_agent.process_request(original_request, [])
+            return decision_info['response']
+        except Exception as e:
+            logger.error(f"❌ 回應生成失敗: {e}")
+            return await self._direct_response(original_request)
+    
+
     
     def _log_response(self, agent_type: str, content: str):
         """記錄 Agent 回應"""
@@ -330,12 +238,19 @@ FOCUS: [重點關注的資訊類型]
         self.conversation_log = []
 
     async def __aexit__(self, exc_type, exc, tb):
-        # 清理 MCP 客戶端連線（若有啟動）
+        # 清理資源
         try:
-            if getattr(self, "_mcp_started", False) and hasattr(self, "mcp_client"):
-                await self.mcp_client.stop()
-        except Exception:
-            pass
+            if self.search_agent:
+                await self.search_agent.cleanup()
+        except Exception as e:
+            logger.error(f"❌ 清理 Search Agent 時發生錯誤: {e}")
+    
+    async def cleanup(self):
+        """手動清理資源"""
+        if self.search_agent:
+            await self.search_agent.cleanup()
+        if self.rag_agent:
+            await self.rag_agent.cleanup()
 
 async def create_practical_agent_orchestrator(chat_service=None) -> Optional[PracticalAgentOrchestrator]:
     """創建實用的 Agent 協調器"""
@@ -383,7 +298,8 @@ async def create_practical_agent_orchestrator(chat_service=None) -> Optional[Pra
         # 創建協調器
         orchestrator = PracticalAgentOrchestrator(chat_service)
         
-        # 不自動添加能力，由調用方根據需求添加
+        # RAG 能力已在協調器初始化時自動啟用
+        # 不自動添加 web search 能力，由調用方根據需求添加
         # orchestrator.add_web_search_capability()  # 移除自動添加
         
         return orchestrator
