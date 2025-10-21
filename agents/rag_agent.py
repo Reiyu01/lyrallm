@@ -12,6 +12,7 @@ from semantic_kernel.connectors.ai.chat_completion_client_base import ChatComple
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.functions import kernel_function
 from .smart_parameter_manager import smart_settings
+from .rate_limiter import safe_chat_completion
 
 # 導入 embedding 和 ES 相關模組
 from config.config_manager import config_manager
@@ -257,9 +258,10 @@ QUERY_INTENT: [資訊檢索意圖說明]
 SEARCH_STRATEGY: [向量搜尋策略]
 """)
             
-            response = await self.chat_service.get_chat_message_contents(
-                chat_history=chat_history,
-                settings=smart_settings(
+            response = await safe_chat_completion(
+                self.chat_service,
+                chat_history,
+                smart_settings(
                     self.chat_service,
                     max_completion_tokens=500,
                     temperature=0.3
@@ -377,9 +379,10 @@ MISSING_INFO: [可能缺失的資訊]
 SUMMARY: [搜尋結果摘要]
 """)
             
-            response = await self.chat_service.get_chat_message_contents(
-                chat_history=chat_history,
-                settings=smart_settings(
+            response = await safe_chat_completion(
+                self.chat_service,
+                chat_history,
+                smart_settings(
                     self.chat_service,
                     max_completion_tokens=800,
                     temperature=0.2

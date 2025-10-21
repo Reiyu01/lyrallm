@@ -11,6 +11,7 @@ from semantic_kernel.connectors.ai.chat_completion_client_base import ChatComple
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.functions import kernel_function
 from .smart_parameter_manager import smart_settings
+from .rate_limiter import safe_chat_completion
 
 logger = logging.getLogger(__name__)
 
@@ -201,9 +202,10 @@ ALTERNATIVE_KEYWORDS: [備選關鍵字1 | 備選關鍵字2 | 備選關鍵字3]
 SEARCH_STRATEGY: [搜尋策略說明]
 """)
             
-            response = await self.chat_service.get_chat_message_contents(
-                chat_history=chat_history,
-                settings=smart_settings(
+            response = await safe_chat_completion(
+                self.chat_service,
+                chat_history,
+                smart_settings(
                     self.chat_service, 
                     max_completion_tokens=1000,
                     temperature=0.3
