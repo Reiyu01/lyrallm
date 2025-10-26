@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.practical_agent_orchestrator import create_practical_agent_orchestrator
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 async def test_rag_routing():
     """測試 RAG 路由功能"""

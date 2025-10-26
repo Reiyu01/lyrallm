@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from adapters.elasticsearch_adapter import ElasticsearchAdapter
 from embedding_provider import get_default_provider
 

@@ -14,7 +14,7 @@ from semantic_kernel.functions import kernel_function
 from .smart_parameter_manager import smart_settings
 
 # 導入 embedding 和 ES 相關模組
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from adapters.elasticsearch_adapter import ElasticsearchAdapter
 from embedding_provider import get_default_provider
 

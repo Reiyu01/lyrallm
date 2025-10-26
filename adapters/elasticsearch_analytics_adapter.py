@@ -12,7 +12,7 @@ import traceback
 import logging
 import hashlib
 from elasticsearch import AsyncElasticsearch
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 

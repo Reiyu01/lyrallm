@@ -1,4 +1,4 @@
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from typing import Any, Optional
 import logging
 

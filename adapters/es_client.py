@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Optional
 from elasticsearch import AsyncElasticsearch
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)

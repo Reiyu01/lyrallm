@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 
-from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 
 # 導入新的資料模型
 try:
