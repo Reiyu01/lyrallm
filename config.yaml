@@ -75,7 +75,7 @@ models:
       max_completion_tokens: 4096
       # intents: list of intents this model should be considered for by the semantic router
       # set to an empty list to let intent_routing map intents -> models instead
-      intents: ["general"]
+      intents: ["open_qa"]
       iq_score: 25   # placeholder IQ score (will be mapped to percentile -> capability level)
 
 
@@ -89,7 +89,7 @@ models:
       description: "Azure OpenAI o3-mini via Semantic Kernel"
       #max_tokens: 4096
       max_completion_tokens: 4096
-      intents: ["qa", "summarize"]
+      intents: ["open_qa", "closed_qa","summarize"]
       # approximate capability baseline lower than gpt-4o
       iq_score: 48
 
@@ -104,7 +104,7 @@ models:
       description: "Azure OpenAI o1"
       #max_tokens: 4096
       max_completion_tokens: 4096
-      intents: ["finance"]
+      intents: ["summarize"]
       iq_score: 47
 
 
@@ -125,11 +125,11 @@ models:
     - name: "gpt-oss:20b"
       provider: "ollama"
       endpoint: "${OLLAMA_BASE_URL}"
-      enabled: false
+      enabled: true
       description: "Llama 2 via Ollama and Semantic Kernel"
       max_tokens: 2048
       temperature: 0.8
-      intents: ["summarize"]
+      intents: ["chatbot"]
       iq_score: 43
 
 

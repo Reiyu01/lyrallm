@@ -1,6 +1,7 @@
 import time
 import logging
 import asyncio
+import json
 from typing import Optional, List, Dict, Any, Tuple
 from lyrallm.config.config_manager import config_manager
 from .model_manager import get_model_manager_sync
@@ -252,30 +253,54 @@ class ModelExecutor:
             if not response:
                 raise RuntimeError('Empty response from model provider')
 
-            # Extract response content
+            # Extract and normalize response content
             response_text = str(response[0].content)
-            
+            normalized_text = response_text
+            raw_payload = None
+            try:
+                parsed_payload = json.loads(response_text)
+                if isinstance(parsed_payload, dict):
+                    raw_payload = parsed_payload
+                    candidate = (
+                        parsed_payload.get('response')
+                        or parsed_payload.get('message')
+                        or parsed_payload.get('content')
+                        or parsed_payload.get('text')
+                    )
+                    if isinstance(candidate, str) and candidate.strip():
+                        normalized_text = candidate
+            except json.JSONDecodeError:
+                pass
+
             # Calculate token usage (best effort)
-            usage = self._calculate_usage(messages, response_text)
-            
+            usage = self._calculate_usage(messages, normalized_text)
+
+            # Ensure routing info reflects the actual model used
+            updated_routing = dict(routing_info or {})
+            updated_routing['model'] = model_name
+
             # Build standardized response
+            meta = {
+                'latency_ms': int((time.time() - start_time) * 1000),
+                'provider': model_cfg.get('provider'),
+                'routing_info': updated_routing,
+                'plugins_used': plugins_available
+            }
+            if raw_payload is not None:
+                meta['raw_response'] = raw_payload
+
             result = {
                 'id': f'chatcmpl-{int(time.time())}-{request_id}',
                 'created': int(time.time()),
                 'model': model_name,
                 'choices': [{
                     'index': 0, 
-                    'message': {'role': 'assistant', 'content': response_text}, 
+                    'message': {'role': 'assistant', 'content': normalized_text}, 
                     'finish_reason': 'stop'
                 }],
                 'usage': usage,
-                'text': response_text,
-                'meta': {
-                    'latency_ms': int((time.time() - start_time) * 1000),
-                    'provider': model_cfg.get('provider'),
-                    'routing_info': routing_info,
-                    'plugins_used': plugins_available
-                }
+                'text': normalized_text,
+                'meta': meta
             }
             
             logger.info(f"[{request_id}] Response generated successfully ({usage['total_tokens']} tokens)")
@@ -289,6 +314,12 @@ class ModelExecutor:
         """Apply generation parameters to execution settings."""
         # Some reasoning / structured models (o1/o3 family) may reject temperature
         model_name = model_cfg.get('deployment_name') or model_cfg.get('name') or ''
+        provider = model_cfg.get('provider', '')
+        
+        if provider == 'ollama':
+            logger.debug(f"Skipping temperature/max_tokens for Ollama model: {model_name}")
+            return
+        
         if not any(x in model_name for x in ['o1', 'o3']):
             try:
                 execution_settings.temperature = temperature
@@ -406,9 +437,62 @@ class ModelExecutor:
                 kernel.add_service(service)
                 
             elif provider == 'ollama':
-                # TODO: Add Ollama connector when available
-                logger.warning(f"Ollama provider support not yet implemented for {model_name}")
-                return None
+                import requests, json
+
+                base_url = model_config.get('endpoint', 'http://127.0.0.1:11434')
+                model_name = model_config.get('name')
+                logger.info(f"Registering Ollama provider for {model_name} at {base_url}")
+
+                class OllamaChatCompletion(ChatCompletionClientBase):
+                    """Minimal Ollama connector compatible with Semantic Kernel chat interface."""
+                    def __init__(self, base_url: str, model_name: str):
+                        super().__init__(service_id=f"ollama_{model_name}",
+                                         ai_model_id=model_name)
+                        self._base_url = base_url
+                        self._model_name = model_name
+
+                    async def get_chat_message_contents(self, chat_history: ChatHistory, settings=None, **kwargs):
+                        # 將聊天紀錄轉成 Ollama prompt
+                        messages = []
+                        for msg in chat_history.messages:
+                            role = getattr(msg, 'role', 'user')
+                            content = getattr(msg, 'content', '')
+                            messages.append({"role": role, "content": content})
+
+                        prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+
+                        payload = {
+                            "model": self._model_name,
+                            "prompt": prompt,
+                            "stream": False
+                        }
+
+                        logger.info(f"Calling Ollama API: {self._base_url}/api/generate, model={self._model_name}")
+
+                        try:
+                            resp = requests.post(f"{self._base_url}/api/generate", json=payload, timeout=120)
+                            resp.raise_for_status()
+                            output = ""
+                            for line in resp.iter_lines():
+                                if line:
+                                    data = line.decode("utf-8")
+                                    if data.startswith("data: "):
+                                        json_obj = json.loads(data[6:])
+                                        if "response" in json_obj:
+                                            output += json_obj["response"]
+                                        if json_obj.get("done"):
+                                            break
+                            if not output:
+                                output = resp.text
+                            return [ChatMessageContent(role="assistant", content=output.strip())]
+
+                        except Exception as e:
+                            logger.error(f"Ollama model execution failed: {e}")
+                            raise
+
+                # ✅ 註冊自定義 Ollama connector
+                ollama_service = OllamaChatCompletion(base_url=base_url, model_name=model_name)
+                kernel.add_service(ollama_service)
                 
             else:
                 logger.error(f"Unsupported provider '{provider}' for model {model_name}")

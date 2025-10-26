@@ -359,17 +359,22 @@ class SLMAnalyzer:
                 
                 # 映射 intent 到舊格式
                 intent_mapping = {
-                    'Open QA': 'qa_general',
-                    'Closed QA': 'qa_general',
-                    'Summarization': 'text_summary',
-                    'Text Generation': 'creative_writing',
-                    'Code Generation': 'code_generation',
-                    'Chatbot': 'qa_general',
-                    'Classification': 'qa_general',
-                    'Rewrite': 'text_summary',
-                    'Brainstorming': 'creative_writing',
-                    'Extraction': 'data_analysis',
-                    'Other': 'qa_general'
+                    # 問答類
+                    'Open QA': 'open_qa',               # 一般開放式問答
+                    'Closed QA': 'closed_qa',           # 封閉式問答（知識庫查詢等）
+                    'Chatbot': 'chatbot',               # 對話型聊天
+                    'Classification': 'classification', # 分類任務
+
+                    # 生成類
+                    'Summarization': 'text_summary',    # 摘要任務
+                    'Rewrite': 'text_rewrite',          # 改寫、潤稿
+                    'Text Generation': 'creative_writing',  # 文字創作
+                    'Brainstorming': 'idea_generation',     # 腦力激盪／創意生成
+
+                    # 專業應用
+                    'Code Generation': 'code_generation',   # 程式生成
+                    'Extraction': 'data_analysis',          # 資料萃取／分析
+                    'Other': 'qa_general'                   # 預設保底任務
                 }
                 
                 intent = intent_mapping.get(intent_value, intent_value.lower().replace(' ', '_'))
