@@ -7,6 +7,7 @@ import json
 import asyncio
 import uuid
 from datetime import datetime
+import httpx
 from lyrallm.config.config_manager import config_manager
 from lyrallm.core import get_default_executor
 
@@ -106,6 +107,10 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: List[ChatCompletionChoice]
     usage: ChatCompletionUsage
+    # Option A: expose metadata including routing info back to frontend
+    meta: Optional[Dict[str, Any]] = None
+    # Convenience: also expose routing_info on top-level for easy access
+    routing_info: Optional[Dict[str, Any]] = None
 
 # All kernel management now handled by unified ModelExecutor for consistency
     
@@ -817,7 +822,9 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
                 created=exec_result.get('created', int(time.time())),
                 model=actual_model,
                 choices=[choice],
-                usage=usage_obj
+                usage=usage_obj,
+                meta=exec_result.get('meta', {}),
+                routing_info=routing_meta or exec_result.get('meta', {}).get('routing_info', None)
             )
 
             # Enterprise-grade token usage tracking
@@ -833,9 +840,16 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
             
             # Log routing information for enterprise observability
             if routing_meta:
-                logger.info(f"[{request_id}] Auto-routing: {actual_model} "
-                           f"(intent={routing_meta.get('intent')}, "
-                           f"confidence={routing_meta.get('confidence'):.3f})")
+                raw_conf = routing_meta.get('confidence')
+                if isinstance(raw_conf, (int, float)):
+                    confidence_str = f"{raw_conf:.3f}"
+                else:
+                    confidence_str = "n/a"
+
+                logger.info(
+                    f"[{request_id}] Auto-routing: {actual_model} "
+                    f"(intent={routing_meta.get('intent')}, confidence={confidence_str})"
+                )
             
             logger.info(f"[{request_id}] Chat completion successful - Model: {actual_model}, "
                        f"Tokens: {usage_obj.total_tokens}, "
@@ -887,6 +901,9 @@ async def get_chat_models():
                 "temperature": model.get("temperature", 0.7)
             })
         
+        names = [model["name"] for model in chat_models]
+        logger.info(f"Chat models available: {names}")
+
         return {
             "object": "list",
             "data": chat_models
@@ -911,19 +928,45 @@ async def chat_health_check():
         # 獲取已加載的模型數量
         available_models = config_manager.get_available_models()
         models_count = len([m for m in available_models if m.get('enabled', False)])
+        services = {
+            "semantic_kernel": "ready",
+            "event_bus": "running" if event_status.get("running") else "stopped",
+            "postgres": "connected" if pg_health.get("connected") else "disconnected",
+            "token_tracking": "enabled",
+        }
 
+        # Ollama health check (for SLM analyzer)
+        ollama_models: List[str] = []
+        try:
+            ollama_cfg = config_manager.get_provider_config("ollama") or {}
+            base_url = (ollama_cfg.get("base_url") or "").strip()
+            if base_url:
+                if not base_url.startswith("http://") and not base_url.startswith("https://"):
+                    base_url = f"http://{base_url}"
+                url = base_url.rstrip("/") + "/api/tags"
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(url)
+                if resp.status_code == 200:
+                    services["ollama"] = "reachable"
+                    try:
+                        payload = resp.json()
+                        ollama_models = [m.get("name") for m in payload.get("models", []) if m.get("name")]
+                    except Exception:
+                        ollama_models = []
+                else:
+                    services["ollama"] = f"unreachable:{resp.status_code}"
+            else:
+                services["ollama"] = "not_configured"
+        except Exception as ollama_error:
+            services["ollama"] = f"error:{ollama_error}"
         return {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "services": {
-                "semantic_kernel": "ready",
-                "event_bus": "running" if event_status.get("running") else "stopped",
-                "postgres": "connected" if pg_health.get("connected") else "disconnected",
-                "token_tracking": "enabled"
-            },
+            "services": services,
             "event_bus_info": event_status,
             "postgres_info": pg_health,
-            "models_loaded": models_count
+            "models_loaded": models_count,
+            "ollama_models": ollama_models
         }
         
     except Exception as e:

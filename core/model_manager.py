@@ -170,7 +170,7 @@ class ModelManager:
         for model in config_manager.get_available_models():
             model_name = model.get('name')
             model_intents = model.get('intents', [])
-            
+
             if not model_name or model_name not in self.metrics:
                 continue
             
@@ -179,9 +179,14 @@ class ModelManager:
                 continue
                 
             metrics = self.metrics[model_name]
-            
+
             # Skip unhealthy or disabled models
             if metrics.status in [ModelStatus.UNHEALTHY, ModelStatus.DISABLED]:
+                continue
+
+            # Skip virtual/pseudo models like 'auto' that are not invokable providers
+            provider = model.get('provider')
+            if model_name == 'auto' or provider == 'auto':
                 continue
             
             # Check if model supports this intent
