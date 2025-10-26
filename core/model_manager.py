@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from enum import Enum
 
-from lyrallm.config.config_manager import config_manager
+from config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,11 @@ class ModelManager:
         models = config_manager.get_all_models()
         for model in models:
             model_name = model.get('name')
+            
+            # Skip virtual "auto" model as it's not a real model
+            if model_name == "auto" or model.get('provider') == "auto":
+                continue
+                
             if model_name and model_name not in self.metrics:
                 self.metrics[model_name] = ModelMetrics(name=model_name)
                 
@@ -168,7 +173,11 @@ class ModelManager:
 
             if not model_name or model_name not in self.metrics:
                 continue
-
+            
+            # Skip virtual "auto" model as it's not a real model
+            if model_name == "auto" or model.get('provider') == "auto":
+                continue
+                
             metrics = self.metrics[model_name]
 
             # Skip unhealthy or disabled models
