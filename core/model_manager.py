@@ -174,9 +174,9 @@ class ModelManager:
             if not model_name or model_name not in self.metrics:
                 continue
             
-            # Skip virtual "auto" model as it's not a real model
-            if model_name == "auto" or model.get('provider') == "auto":
-                continue
+            # # Skip virtual "auto" model as it's not a real model
+            # if model_name == "auto" or model.get('provider') == "auto":
+            #     continue
                 
             metrics = self.metrics[model_name]
 
