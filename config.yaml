@@ -1,4 +1,4 @@
-# Semantic Kernel 模型配置
+﻿# Semantic Kernel 模型配置
 server:
   host: "0.0.0.0"
   port: 8081
@@ -134,6 +134,100 @@ models:
 
 
 
+auth:
+  default_role: "standard_user"
+
+  roles:
+    - name: "admin"
+      description: "Full administrator; manages routing and policies."
+      inherits: ["security_officer", "ops"]
+      permissions:
+        - "manage:roles"
+        - "manage:routing"
+        - "manage:policies"
+        - "view:audit_logs"
+        - "view:costs"
+        - "configure:integrations"
+      feature_flags:
+        - "web_search"
+        - "code_interpreter"
+        - "image_generation"
+        - "external_connectors"
+      routing_policies:
+        allow_external_providers: true
+        audit_level: "full"
+
+    - name: "security_officer"
+      description: "Enforces safety policy and handles sensitive escalations."
+      inherits: []
+      permissions:
+        - "enforce:safety_policies"
+        - "view:audit_logs"
+        - "approve:data_release"
+      feature_flags:
+        - "web_search"
+      routing_policies:
+        allow_external_providers: true
+        escalate_on_sensitive: true
+        audit_level: "high"
+
+    - name: "ops"
+      description: "Keeps routing reliable and cost efficient."
+      inherits: []
+      permissions:
+        - "manage:failover"
+        - "view:costs"
+        - "view:routing_health"
+      feature_flags:
+        - "web_search"
+        - "internal_tools"
+      routing_policies:
+        allow_external_providers: true
+        preferred_fallback: "gpt-oss:20b"
+
+    - name: "reviewer"
+      description: "Reviews flagged conversations and resolves incidents."
+      inherits: []
+      permissions:
+        - "view:audit_logs"
+        - "resolve:incidents"
+      feature_flags: []
+      routing_policies:
+        allow_external_providers: true
+        audit_level: "review"
+
+    - name: "power_user"
+      description: "Trusted employee with advanced productivity features."
+      inherits: ["standard_user"]
+      permissions:
+        - "use:web_search"
+        - "use:code_interpreter"
+        - "request:advanced_features"
+      feature_flags:
+        - "web_search"
+        - "code_interpreter"
+      routing_policies:
+        allow_external_providers: true
+        preferred_tiers:
+          - "premium"
+          - "trusted"
+          
+    - name: "standard_user"
+      description: "Default employee profile."
+      inherits: []
+      permissions:
+        - "chat:basic"
+      feature_flags: []
+      routing_policies:
+        allow_external_providers: false
+        preferred_tiers:
+          - "trusted"
+          - "internal_only"
+        fallback: "gpt-oss:20b"
+        sensitive_categories:
+          - "S7"
+        sensitive_fallback: "gpt-oss:20b"
+
 providers:
   azure_openai:
     endpoint: "${AZURE_OPENAI_ENDPOINT}"
@@ -252,3 +346,4 @@ logging:
 #   model: all-MiniLM-L6-v2
 # embeddings:
 #   provider: fake
+

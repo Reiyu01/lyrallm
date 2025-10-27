@@ -4,6 +4,7 @@ import asyncio
 import json
 from typing import Optional, List, Dict, Any, Tuple
 from lyrallm.config.config_manager import config_manager
+from lyrallm.auth.dependencies import RequestSecurityContext
 from .model_manager import get_model_manager_sync
 
 import semantic_kernel as sk
@@ -33,7 +34,8 @@ class ModelExecutor:
 
     async def generate(self, model_name: str, messages: Optional[List[Any]] = None,
                        temperature: float = 0.7, max_tokens: Optional[int] = None,
-                       features: Optional[dict] = None) -> Dict[str, Any]:
+                       features: Optional[dict] = None,
+                       security_ctx: Optional[RequestSecurityContext] = None) -> Dict[str, Any]:
         """Generate response with intelligent model routing.
         
         Args:
@@ -60,6 +62,11 @@ class ModelExecutor:
                     model_name = self._get_fallback_model()
             else:
                 routing_info = None
+
+            if security_ctx and routing_info:
+                model_name, routing_info = self._enforce_security_policies(
+                    model_name, routing_info, security_ctx, request_id
+                )
 
             # Get model configuration
             model_cfg = config_manager.get_model_by_name(model_name) or {}
@@ -100,6 +107,70 @@ class ModelExecutor:
             
             # Enterprise fallback strategy
             return await self._handle_generation_failure(model_name, messages, start_time, str(e))
+
+    def _enforce_security_policies(
+        self,
+        model_name: str,
+        routing_info: Dict[str, Any],
+        security_ctx: RequestSecurityContext,
+        request_id: str
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Apply role-based routing policies (e.g. sensitive fallbacks)."""
+        policies = dict(security_ctx.routing_policies or {})
+        if not policies:
+            return model_name, routing_info
+
+        category = (routing_info or {}).get('category')
+        if not category:
+            return model_name, routing_info
+
+        normalized_category = str(category).upper()
+        raw_sensitive = policies.get('sensitive_categories') or []
+        if isinstance(raw_sensitive, str):
+            sensitive_categories = {raw_sensitive.upper()}
+        else:
+            sensitive_categories = {str(item).upper() for item in raw_sensitive}
+
+        if normalized_category not in sensitive_categories:
+            return model_name, routing_info
+
+        fallback_model = (
+            policies.get('sensitive_fallback_model')
+            or policies.get('sensitive_fallback')
+            or policies.get('fallback_model')
+            or policies.get('fallback')
+        )
+
+        if not fallback_model or fallback_model == model_name:
+            return model_name, routing_info
+
+        if not self._is_model_available(fallback_model):
+            logger.warning(
+                "[%s] Sensitive fallback model '%s' unavailable; keeping routed model '%s'",
+                request_id,
+                fallback_model,
+                model_name,
+            )
+            return model_name, routing_info
+
+        updated_info = dict(routing_info or {})
+        updated_info['policy_enforced_model'] = fallback_model
+        actions = list(updated_info.get('policy_actions', []))
+        actions.append({
+            'type': 'sensitive_category_fallback',
+            'category': normalized_category,
+            'target_model': fallback_model,
+        })
+        updated_info['policy_actions'] = actions
+
+        logger.info(
+            "[%s] Applied sensitive routing policy: %s -> %s due to category %s",
+            request_id,
+            model_name,
+            fallback_model,
+            normalized_category,
+        )
+        return fallback_model, updated_info
 
     async def _route_model(self, messages: Optional[List[Any]], request_id: str) -> Tuple[str, Dict]:
         """Intelligent model routing based on message content and model health."""
