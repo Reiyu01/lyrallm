@@ -1,0 +1,145 @@
+Lyra 角色職責速覽
+==================
+
+用途  
+----
+這份純文字檔專注在「各角色的核心職責、常見工作流與可能查閱的公司內部資料」。  
+用於：
+1. 建立知識圖譜節點（角色 ↔ 職責 ↔ 文件類別）。  
+2. 模擬使用者在 RBAC/資料存取測試中的調閱行為。  
+3. 產生測試記錄，觀察不同角色觸發的職責與文件類型是否符合規範。
+
+快速總覽  
+--------
+
+| 角色 ID            | 顯示名稱        | 部門/定位                    | 核心職責摘要                                            |
+|--------------------|-----------------|------------------------------|---------------------------------------------------------|
+| standard_user       | Iris Lin        | Customer Operations          | 回覆一般客服需求、整理回饋、回報異常                   |
+| power_user          | Kevin Huang     | Productivity Innovation      | 建立/驗證進階工作流、資料分析、撰寫自動化腳本         |
+| reviewer            | Claire Chen     | Trust & Safety               | 審核被標記的對話、結案報告、提出改善建議               |
+| ops                 | Ops Team (Svc)  | SRE / Platform Reliability   | 監控路由健康與成本、執行 failover、調整流量            |
+| security_officer    | Wei Liao        | Security & Governance        | 安全稽核、敏感資料審批、風險調查                       |
+| admin               | System Admin    | Platform Governance          | 管理策略/供應商/整合、核定功能開放、審視營運紀錄       |
+
+
+角色詳述  
+--------
+
+1. standard_user  
+   - 具體職責  
+     * 處理一般客戶問題並輸入客服系統。  
+     * 將反饋摘要同步至內部公告欄。  
+     * 觀察異常模型回覆並填寫報告。  
+   - 常查閱的內部文件類型  
+     * FAQ、產品知識庫、客服腳本。  
+     * 客戶通報表單、異常回報流程。  
+   - 測試建議  
+     * 建立 5~10 筆客服案例，標註「回覆摘要」「異常通報」。  
+     * 確認知識圖譜中 `Role-standard_user -> Document-FAQ` 關聯有內容。
+
+2. power_user  
+   - 具體職責  
+     * 持續調整進階對話提示或工作流。  
+     * 將資料分析結果分享給產品/營運部門。  
+     * 提交「進階功能申請表」並追蹤審批。  
+   - 常查閱的內部文件類型  
+     * 生產力工具 SOP、程式碼片段、數據分析報表。  
+     * 功能申請紀錄、A/B 測試結果。  
+   - 測試建議  
+     * 建立 `PowerUser-Workflow-Guide`、`DataReport` 兩類文件，模擬搜尋/引用事件。  
+     * 檢查圖譜中是否出現 `Role-power_user -> Responsibility-WorkflowDesign` 關聯。
+
+3. reviewer  
+   - 具體職責  
+     * 審查高風險或被申訴的對話內容。  
+     * 撰寫結案紀錄，建議產品或營運改善。  
+     * 與安全/法務溝通事件結果。  
+   - 常查閱的內部文件類型  
+     * 審查流程指引、事件模板、法律政策備忘。  
+     * 過往審查案例、黑名單列表。  
+   - 測試建議  
+     * 建立模擬事件資料 (`Incident-2025-xx`) 並關聯 reviewer。  
+     * 驗證「僅 reviewer 能看到結案附件」的 RBAC 限制。
+
+4. ops  
+   - 具體職責  
+     * 監控各模型/供應商的健康度、成本與延遲。  
+     * 執行或排定 failover 測試。  
+     * 調整流量分配，確保營運穩定。  
+   - 常查閱的內部文件類型  
+     * 路由健康報表、供應商 SLA、成本分析。  
+     * Failover 手冊、緊急聯絡名單。  
+   - 測試建議  
+     * 建立 `RoutingHealthReport`、`FailoverRunbook`，並將 Ops 操作寫入事件日誌。  
+     * 確認圖譜中 `Role-ops -> Responsibility-Failover` 與對應文件之間關聯。
+
+5. security_officer  
+   - 具體職責  
+     * 審核敏感資料或高風險請求。  
+     * 驗證輸出是否符合安全政策。  
+     * 追蹤風險事件並提交調查報告。  
+   - 常查閱的內部文件類型  
+     * 安全政策、分類規則、PII 處理 SOP。  
+     * 安全稽核紀錄、事件調查報告。  
+   - 測試建議  
+     * 建立 `PII-Handling-Guide`、`SecurityAudit-Report`，配合事件節點。  
+     * 測試「security_officer 存取敏感文件」時的審計紀錄是否記錄在圖譜。
+
+6. admin  
+   - 具體職責  
+     * 管理角色權限、供應商設定、策略檔。  
+     * 核定功能開放與整合部署。  
+     * 定期檢視成本、稽核、路由統計。  
+   - 常查閱的內部文件類型  
+     * 系統策略文件、供應商合約、稽核總表。  
+     * 功能開放計畫、整合 API 說明。  
+   - 測試建議  
+     * 建立 `Policy-Change-Record`、`Integration-Checklist`，記錄 admin 審查流程。  
+     * 確認 admin 與其他角色的職責繼承在圖譜中正確呈現。
+
+
+------------------------------------------------------------
+3. 知識圖譜建議結構
+------------------------------------------------------------
+
+節點類型：
+  Role、Responsibility、DocumentType、User（可選）、Event/Incident。
+
+關聯建議：
+  Role --HAS_RESPONSIBILITY--> Responsibility  
+  Responsibility --USES_DOCUMENT--> DocumentType  
+  Role --ASSIGNED_TO--> User  
+  Role --PARTICIPATED_IN--> Event (例如 failover、審查、敏感審批)
+
+例如：
+  Role(power_user) --HAS_RESPONSIBILITY--> Responsibility(DataAnalysis)  
+  Responsibility(DataAnalysis) --USES_DOCUMENT--> DocumentType(DataReport)  
+  Role(power_user) --PARTICIPATED_IN--> Event(2025-Analytics-Review)
+
+
+------------------------------------------------------------
+4. 測試流程樣板
+------------------------------------------------------------
+
+1. 建立角色節點與責任節點，連結常用文件類別。  
+2. 依角色生成使用情境（對話、事件、文件查閱記錄）。  
+3. 驗證 RBAC：僅擁有責任或權限的角色能連到相應文件或事件。  
+4. 透過查詢檢視圖譜：例如 `MATCH (r:Role {id:'reviewer'})-[:HAS_RESPONSIBILITY]->(resp)-[:USES_DOCUMENT]->(doc)`。  
+5. 審查稽核：確認 `security_officer` 或 `reviewer` 相關事件皆有詳細調閱紀錄。
+
+
+------------------------------------------------------------
+5. 參考來源
+------------------------------------------------------------
+
+* `lyrallm/config.yaml`：RBAC 正式設定（permissions、feature_flags、routing_policies）。  
+* `lyra-web/client/src/lib/roles.ts`：前端呈現用的 `ROLE_CATALOG`（含角色姓名、徽章）。  
+* `lyrallm/docs/router_flow_explained.md`：路由決策流程背景。  
+* `lyrallm/docs/rbac_roles.md`：舊版本（含亂碼），建議改用本檔。
+
+------------------------------------------------------------
+備註
+------------------------------------------------------------
+
+此檔案故意省略「能用哪些模型、稽核細節」等權限設定，聚焦於職責導向的描述，方便用於知識圖譜或模擬資料建置。若需要完整權限列表，請參考 `config.yaml` 中的 `auth.roles` 區段。
+
