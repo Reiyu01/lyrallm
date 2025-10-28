@@ -121,6 +121,13 @@ class ChatCompletionResponse(BaseModel):
 
     routing_info: Optional[Dict[str, Any]] = None
 
+
+class FeedbackRequest(BaseModel):
+    conversation_id: str
+    message_id: str
+    model: Optional[str] = None
+    feedback: str
+
 # All kernel management now handled by unified ModelExecutor for consistency
     async def _load_plugins(self, kernel: sk.Kernel, model_name: str, features: Optional[Features] = None) -> int:
         """在這個架構中，Plugin 由 Agent 協調器管理，此方法主要用於基本聊天模式"""
@@ -943,6 +950,25 @@ async def get_chat_models(
     except Exception as e:
         logger.error(f"取得聊天模型失敗: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get chat models: {str(e)}")
+
+@router.post("/api/chat/feedback")
+async def submit_chat_feedback(
+    payload: FeedbackRequest,
+    security_ctx: RequestSecurityContext = Depends(get_request_security_context),
+):
+    """Record lightweight chat feedback for routing adjustments."""
+    try:
+        logger.info("[feedback] role=%s user=%s conversation=%s message=%s model=%s feedback=%s",
+                    security_ctx.role.name,
+                    security_ctx.user_id,
+                    payload.conversation_id,
+                    payload.message_id,
+                    payload.model,
+                    payload.feedback)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Feedback handler failure: {e}")
+        raise HTTPException(status_code=500, detail="Failed to record feedback")
 
 @router.get("/api/chat/health")
 async def chat_health_check():
