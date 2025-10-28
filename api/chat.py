@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from typing import List, Dict, Optional, Any, AsyncGenerator
 from pydantic import BaseModel
 import time
@@ -127,6 +128,41 @@ class FeedbackRequest(BaseModel):
     message_id: str
     model: Optional[str] = None
     feedback: str
+
+
+def _extract_text_from_stream_payload(payload: Dict[str, Any]) -> str:
+    """Extract text delta from streaming payload."""
+    if not isinstance(payload, dict):
+        return ""
+
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        choice = choices[0] or {}
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            content = delta.get("content")
+            if isinstance(content, str):
+                return content
+        message = choice.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, str):
+                return content
+
+    for field in ("response", "content", "text"):
+        value = payload.get(field)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _format_sse(payload: Any) -> bytes:
+    """Serialize payload to SSE data line."""
+    try:
+        data = json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        data = json.dumps({"error": "serialization_failed"}, ensure_ascii=False)
+    return f"data: {data}\n\n".encode("utf-8")
 
 # All kernel management now handled by unified ModelExecutor for consistency
     async def _load_plugins(self, kernel: sk.Kernel, model_name: str, features: Optional[Features] = None) -> int:
@@ -819,19 +855,139 @@ async def create_chat_completion(
             else:
                 logger.info(f"[{request_id}] No frontend features specified, using basic chat mode")
 
-            # Use ModelExecutor with built-in auto routing
-
             executor = get_default_executor()
+
+            if request.stream:
+                stream_iterator = executor.stream_generate(
+                    model_name=request.model,
+                    messages=request.messages,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    features=request.features,
+                    security_ctx=security_ctx
+                )
+
+                full_text: str = ""
+                final_payload: Optional[Dict[str, Any]] = None
+                streamed_model: Optional[str] = None
+
+                async def stream_generator():
+                    nonlocal full_text, final_payload, streamed_model
+                    done_sent = False
+                    try:
+                        async for event in stream_iterator:
+                            if not isinstance(event, dict):
+                                continue
+                            event_type = event.get("type")
+                            payload = event.get("payload") or {}
+                            if not isinstance(payload, dict):
+                                continue
+
+                            if event_type == "info":
+                                model_hint = payload.get("model")
+                                if isinstance(model_hint, str):
+                                    streamed_model = model_hint
+                                yield _format_sse(payload)
+                                continue
+
+                            if event_type == "delta":
+                                model_hint = payload.get("model")
+                                if isinstance(model_hint, str):
+                                    streamed_model = model_hint
+                                text_piece = _extract_text_from_stream_payload(payload)
+                                if text_piece:
+                                    full_text += text_piece
+                                yield _format_sse(payload)
+                                continue
+
+                            if event_type == "final":
+                                final_payload = payload
+                                model_hint = payload.get("model")
+                                if isinstance(model_hint, str):
+                                    streamed_model = model_hint
+
+                                if not full_text:
+                                    final_text = _extract_text_from_stream_payload(payload)
+                                    if final_text:
+                                        full_text = final_text
+                                if not full_text and isinstance(payload.get("text"), str):
+                                    full_text = payload["text"]
+
+                                yield _format_sse(payload)
+                                continue
+
+                            # Unexpected payload, forward as-is
+                            if payload:
+                                yield _format_sse(payload)
+
+                        yield b"data: [DONE]\n\n"
+                        done_sent = True
+                    except Exception as stream_error:
+                        logger.error(f"[{request_id}] Streaming generator error: {stream_error}")
+                        error_payload = {
+                            "error": str(stream_error),
+                            "model": streamed_model or request.model,
+                        }
+                        yield _format_sse(error_payload)
+                        if not done_sent:
+                            yield b"data: [DONE]\n\n"
+                            done_sent = True
+                    finally:
+                        status = "success" if final_payload else "system_error"
+                        tracked_model = streamed_model
+                        if final_payload:
+                            tracked_model = final_payload.get("model", tracked_model)
+                        if not tracked_model:
+                            tracked_model = request.model
+
+                        usage_payload: Optional[Dict[str, Any]] = None
+                        if final_payload and isinstance(final_payload.get("usage"), dict):
+                            usage_payload = final_payload["usage"]
+                        if not usage_payload and full_text:
+                            try:
+                                usage_payload = executor._calculate_usage(request.messages, full_text)  # type: ignore[attr-defined]
+                            except Exception:
+                                usage_payload = None
+
+                        if final_payload and not full_text and isinstance(final_payload.get("text"), str):
+                            full_text = final_payload["text"]
+
+                        usage_obj: Optional[ChatCompletionUsage] = None
+                        if isinstance(usage_payload, dict):
+                            usage_obj = ChatCompletionUsage(
+                                prompt_tokens=int(usage_payload.get("prompt_tokens", 0)),
+                                completion_tokens=int(usage_payload.get("completion_tokens", 0)),
+                                total_tokens=int(usage_payload.get("total_tokens", 0)),
+                            )
+
+                        try:
+                            await track_token_usage(
+                                request_id=request_id,
+                                model_name=tracked_model,
+                                usage=usage_obj,
+                                start_time=start_time,
+                                status=status,
+                                user_id=security_ctx.user_id,
+                                messages=request.messages,
+                                response_text=full_text or ""
+                            )
+                        except Exception as metric_error:
+                            logger.error(f"[{request_id}] Failed to record streaming token usage: {metric_error}")
+
+                headers = {
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                }
+                return StreamingResponse(stream_generator(), media_type="text/event-stream", headers=headers)
+
             exec_result = await executor.generate(
-                model_name=request.model,  # Pass 'auto' directly to executor
+                model_name=request.model,
                 messages=request.messages,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 features=request.features,
                 security_ctx=security_ctx
             )
-
-            # Convert ModelExecutor result to ChatCompletionResponse
 
             actual_model = exec_result.get('model', request.model)
             routing_meta = exec_result.get('meta', {}).get('routing_info', {})
@@ -858,8 +1014,6 @@ async def create_chat_completion(
                 routing_info=routing_meta or exec_result.get('meta', {}).get('routing_info', None)
             )
 
-            # Enterprise-grade token usage tracking
-
             await track_token_usage(
                 request_id=request_id,
                 model_name=actual_model,
@@ -871,21 +1025,18 @@ async def create_chat_completion(
                 response_text=response.choices[0].message.content
             )
 
-            # Log routing information for enterprise observability
-
             if routing_meta:
                 raw_conf = routing_meta.get('confidence')
-                if isinstance(raw_conf, (int, float)):
-                    confidence_str = f"{raw_conf:.3f}"
-                else:
-                    confidence_str = "n/a"
+                confidence_str = f"{raw_conf:.3f}" if isinstance(raw_conf, (int, float)) else "n/a"
                 logger.info(
                     f"[{request_id}] Auto-routing: {actual_model} "
                     f"(intent={routing_meta.get('intent')}, confidence={confidence_str})"
                 )
-            logger.info(f"[{request_id}] Chat completion successful - Model: {actual_model}, "
-                       f"Tokens: {usage_obj.total_tokens}, "
-                       f"Latency: {exec_result.get('meta', {}).get('latency_ms', 0)}ms")
+            logger.info(
+                f"[{request_id}] Chat completion successful - Model: {actual_model}, "
+                f"Tokens: {usage_obj.total_tokens}, "
+                f"Latency: {exec_result.get('meta', {}).get('latency_ms', 0)}ms"
+            )
             return response
     except HTTPException:
 

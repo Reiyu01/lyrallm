@@ -31,7 +31,7 @@ models:
       small_model:
         enabled: true
         provider: "ollama"  # huggingface | ollama | azure_openai | openai
-        model: "gpt-oss:20b"
+        model: "gemma3:12b"
         #deployment_name: "${AZURE_OPENAI_O3MINI_DEPLOYMENT_NAME}"
         # confidence_threshold: 0.8
         max_inference_time: 50000  # ms (120b 大模型需要更多時間，設為 60 秒(60000))
@@ -104,7 +104,7 @@ models:
       description: "Azure OpenAI o1"
       #max_tokens: 4096
       max_completion_tokens: 4096
-      intents: ["summarize"]
+      intents: ["summarize","text_generation"]
       iq_score: 47
 
 
