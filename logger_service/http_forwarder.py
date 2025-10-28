@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import json
-from typing import Optional
+from datetime import datetime, date
+from decimal import Decimal
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +12,21 @@ try:
     HAS_HTTPX = True
 except Exception:
     HAS_HTTPX = False
+
+
+def _sanitize_payload(value: Any) -> Any:
+    """Recursively convert non-JSON-serializable types (e.g., datetime) into strings."""
+    if isinstance(value, dict):
+        return {k: _sanitize_payload(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_payload(v) for v in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 async def post_json(url: str, payload: dict, timeout: float = 5.0) -> bool:
@@ -25,7 +42,8 @@ async def post_json(url: str, payload: dict, timeout: float = 5.0) -> bool:
     for attempt in range(1, max_attempts + 1):
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                r = await client.post(url, json=payload, headers=headers)
+                sanitized = _sanitize_payload(payload)
+                r = await client.post(url, json=sanitized, headers=headers)
                 if 200 <= r.status_code < 300:
                     logger.debug("HTTP forward success to %s (status=%d)", url, r.status_code)
                     return True
@@ -48,7 +66,8 @@ async def post_udp(host: str, port: int, payload: dict) -> bool:
     Note: UDP is connectionless and unreliable; this function performs a best-effort send.
     """
     try:
-        data = json.dumps(payload).encode('utf-8')
+        sanitized = _sanitize_payload(payload)
+        data = json.dumps(sanitized).encode('utf-8')
     except Exception as e:
         logger.warning("Failed to serialize payload for UDP: %s", e)
         return False

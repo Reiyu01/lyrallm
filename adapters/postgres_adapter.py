@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 class PostgresAdapter:
     def __init__(self, dsn: Optional[str] = None):
-        from logger_service.db_client import get_postgres_client
+        from lyrallm.logger_service.db_client import get_postgres_client
         self._pg = get_postgres_client()
         self._dsn = dsn
 

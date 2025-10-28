@@ -15,19 +15,20 @@ class BaseHandler:
 
 
 class DbHandler(BaseHandler):
-    """Handler that writes token usage to Postgres using existing db_client."""
+    """Handler that persists token usage via the configured analytics adapter."""
     background = False
 
     def __init__(self):
-        # use adapter factory for pluggable backends
-    from lyrallm.adapters.factory import get_adapter
+        # use adapter factory for pluggable backends (Postgres / Elasticsearch / etc.)
+        from lyrallm.adapters.factory import get_adapter
         self._adapter = get_adapter('analytics')
+        logger.info(f"DbHandler initialized with adapter: {self._adapter.__class__.__name__}")
 
     async def handle(self, event: Dict[str, Any]):
         try:
             await self._adapter.connect()
             await self._adapter.write_token_usage(event)
-            logger.debug(f"DbHandler: inserted request_id={event.get('request_id')}")
+            logger.info(f"DbHandler wrote request_id={event.get('request_id')} to analytics store")
             return True
         except Exception as e:
             logger.exception(f"DbHandler failed to insert event: {e}")
@@ -39,7 +40,7 @@ class HttpForwardHandler(BaseHandler):
     background = True
 
     def __init__(self, url: str):
-        from logger_service.http_forwarder import post_json
+        from .http_forwarder import post_json
         self._url = url
         self._post = post_json
 
@@ -58,7 +59,7 @@ class UdpForwardHandler(BaseHandler):
     background = True
 
     def __init__(self, host: str, port: int):
-        from logger_service.http_forwarder import post_udp
+        from .http_forwarder import post_udp
         self._host = host
         self._port = int(port)
         self._post_udp = post_udp
@@ -81,10 +82,15 @@ def get_handlers() -> List[BaseHandler]:
     cfg = config_manager.config
     handlers: List[BaseHandler] = []
 
-    # Database handler (if database configured)
-    db_cfg = cfg.get('database', {})
-    if db_cfg:
-        # For now we only have a Postgres handler; if type key is added later we can branch
+    # Database/analytics handler (uses adapter factory, picks Postgres or Elasticsearch)
+    db_cfg = cfg.get('database', {}) or {}
+    storages_cfg = cfg.get('storages', {}) or {}
+    analytics_cfg = storages_cfg.get('analytics', {}) or {}
+    analytics_type = (analytics_cfg.get('type') or analytics_cfg.get('adapter') or analytics_cfg.get('backend') or '').lower()
+    logger.info(f"Logger handlers init - database_cfg_present={bool(db_cfg)} analytics_cfg={analytics_cfg} analytics_type={analytics_type}")
+
+    if db_cfg or analytics_cfg or analytics_type:
+        # Adapter factory will route to Postgres or Elasticsearch depending on config
         handlers.append(DbHandler())
 
     # ELK / forwarder handlers

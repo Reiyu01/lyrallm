@@ -19,48 +19,72 @@ _ES_CLIENT: Optional[AsyncElasticsearch] = None
 
 def _get_es_config():
     """Read Elasticsearch configuration from config_manager + env vars."""
-    cfg = config_manager.config.get('vectordb', {}) or {}
-    es_storage = config_manager.config.get('storages', {}).get('elasticsearch', {})
+    vector_cfg = config_manager.config.get('vectordb', {}) or {}
+    storages_cfg = config_manager.config.get('storages', {}) or {}
+
+    # Prefer explicit analytics storage when it is configured for Elasticsearch
+    analytics_cfg = storages_cfg.get('analytics', {}) or {}
+    es_storage = storages_cfg.get('elasticsearch', {}) or {}
+    use_vector_cfg = True
+    if not es_storage:
+        if isinstance(analytics_cfg, dict):
+            analytics_type = (
+                analytics_cfg.get('type')
+                or analytics_cfg.get('adapter')
+                or analytics_cfg.get('backend')
+            )
+            if analytics_type and analytics_type.lower() == 'elasticsearch':
+                es_storage = analytics_cfg.get('es') or analytics_cfg
+                use_vector_cfg = False
+    elif isinstance(es_storage, dict) and 'es' in es_storage:
+        # allow nesting similar to analytics config for consistency
+        es_storage = es_storage.get('es') or es_storage
+        use_vector_cfg = False
+    else:
+        # explicit storages.elasticsearch should take precedence over vector_cfg values
+        use_vector_cfg = False
+
+    fallback_cfg = vector_cfg if use_vector_cfg else {}
 
     endpoint = (
-        cfg.get('endpoint')
-        or cfg.get('host')
-        or es_storage.get('endpoint')
+        es_storage.get('endpoint')
         or es_storage.get('host')
+        or fallback_cfg.get('endpoint')
+        or fallback_cfg.get('host')
         or os.getenv("ES_LOCAL_URL")
         or os.getenv("ES_HOST")
         or "http://127.0.0.1:9200"
     )
 
     index = (
-        cfg.get('index')
-        or es_storage.get('index')
+        es_storage.get('index')
+        or fallback_cfg.get('index')
         or "semantic_index"
     )
 
     dims = (
-        cfg.get('dims')
-        or cfg.get('embedding_dims')
-        or es_storage.get('dims')
+        es_storage.get('dims')
+        or fallback_cfg.get('dims')
+        or fallback_cfg.get('embedding_dims')
         or 1536
     )
 
     api_key = (
-        cfg.get('api_key')
-        or es_storage.get('api_key')
+        es_storage.get('api_key')
+        or fallback_cfg.get('api_key')
         or os.getenv("ES_API_KEY")
         or os.getenv("ES_LOCAL_API_KEY")
     )
 
     username = (
-        cfg.get('username')
-        or es_storage.get('username')
+        es_storage.get('username')
+        or fallback_cfg.get('username')
         or os.getenv("ES_USERNAME")
     )
 
     password = (
-        cfg.get('password')
-        or es_storage.get('password')
+        es_storage.get('password')
+        or fallback_cfg.get('password')
         or os.getenv("ES_PASSWORD")
     )
 

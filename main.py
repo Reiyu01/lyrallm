@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from lyrallm.config.config_manager import config_manager
+from lyrallm.logger_service.event_consumer import start_event_consumer
 from api.models import router as models_router
 from api.chat import router as chat_router
 
@@ -71,6 +72,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ 模型管理器初始化失敗: {e}")
     
+    try:
+        start_event_consumer()
+        logger.info("Token usage event consumer started")
+    except Exception as e:
+        logger.error(f"Failed to start token usage consumer: {e}")
+    
+
     logger.info("✨ LyraLLM AI Gateway 啟動完成!")
     
     yield

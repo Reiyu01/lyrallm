@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from lyrallm.config.config_manager import config_manager
-from logger_service.handlers import get_handlers
+from .handlers import get_handlers
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ async def _handle_event(event: dict):
             except Exception:
                 pass
 
+        logger.info(f"[EventConsumer] Received event: {event.get('request_id') or event.get('id')}")
         handlers = get_handlers()
 
         for h in handlers:
@@ -43,7 +44,7 @@ def start_event_consumer():
     if backend == 'redis_stream':
         # start redis streams consumer loop
         try:
-            from logger_service.redis_streams import RedisStreamsConsumer
+            from .redis_streams import RedisStreamsConsumer
             consumer = RedisStreamsConsumer()
 
             async def _start_loop():
@@ -53,20 +54,20 @@ def start_event_consumer():
             loop.create_task(_start_loop())
             logger.info("Redis Streams consumer started")
             return
+        except ModuleNotFoundError:
+            logger.info('Redis Streams module not available; falling back to in-process queue.')
         except Exception as e:
             logger.exception(f"Failed to start Redis Streams consumer: {e}")
 
     # fallback to in-process EventBus
     try:
-        from logger_service.event_bus import event_bus
-        event_bus.subscribe(_handle_event)
-        logger.info("In-process EventBus consumer subscribed")
+        from .event_bus import event_bus
+        if event_bus.subscriber_count() == 0:
+            event_bus.subscribe(_handle_event)
+            logger.info("In-process EventBus consumer subscribed")
+        else:
+            logger.info("In-process EventBus consumer already subscribed")
     except Exception as e:
         logger.exception(f"Failed to start in-process event consumer: {e}")
 
 
-# Start consumer on import so package usage triggers it
-try:
-    start_event_consumer()
-except Exception:
-    logger.exception("Failed to start event consumer")

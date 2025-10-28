@@ -20,6 +20,7 @@ class RequestSecurityContext:
     routing_policies: Mapping[str, Any] = field(default_factory=dict)
     allowed_models: Optional[FrozenSet[str]] = None
     requested_role: Optional[str] = None
+    user_id: Optional[str] = None
 
     def has_permission(self, permission: str) -> bool:
         return self.role.has_permission(permission)
@@ -33,6 +34,7 @@ class RequestSecurityContext:
     def to_payload(self) -> Dict[str, Any]:
         """Serialize context for downstream analytics/routing."""
         return {
+            "user_id": self.user_id,
             "role": self.role.name,
             "permissions": sorted(self.permissions),
             "feature_flags": sorted(self.feature_flags),
@@ -47,10 +49,12 @@ def get_role_registry() -> RoleRegistry:
 
 async def get_request_security_context(
     role_header: Optional[str] = Header(None, alias="X-Lyra-Role"),
+    user_header: Optional[str] = Header(None, alias="X-Lyra-User"),
     registry: RoleRegistry = Depends(get_role_registry),
 ) -> RequestSecurityContext:
     """Resolve the caller's security context based on configured RBAC."""
     requested_role = (role_header or "").strip() or None
+    user_id = (user_header or "").strip() or None
 
     role = registry.get_role(requested_role)
     if not role:
@@ -70,6 +74,7 @@ async def get_request_security_context(
         routing_policies=role.routing_policies,
         allowed_models=role.allowed_models,
         requested_role=requested_role or role.name,
+        user_id=user_id,
     )
 
 

@@ -39,7 +39,7 @@ class EventBus:
         if backend == 'redis_stream':
             # lazy import to avoid hard dependency
             try:
-                from logger_service.redis_streams import RedisStreamsPublisher
+                from .redis_streams import RedisStreamsPublisher
                 pub = RedisStreamsPublisher()
                 # schedule the publish but don't await
                 asyncio.create_task(pub.publish(event))

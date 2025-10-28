@@ -435,7 +435,7 @@ async def create_chat_completion(self, model_name: str, messages: List[ChatMessa
 
 # Event-driven: use in-process event bus to publish TokenUsage events
 
-from logger_service.event_bus import event_bus as global_event_bus
+from lyrallm.logger_service.event_bus import event_bus as global_event_bus
 
 async def track_token_usage(request_id: str, model_name: str, usage: Optional[ChatCompletionUsage],
                           start_time: datetime, status: str, user_id: Optional[str] = None, messages: Optional[List[ChatMessage]] = None, response_text: Optional[str] = None):
@@ -780,6 +780,7 @@ async def create_chat_completion(
                     usage=response.usage,
                     start_time=start_time,
                     status="success",
+                    user_id=security_ctx.user_id,
                     messages=request.messages,
                     response_text=response.choices[0].message.content
                 )
@@ -858,6 +859,7 @@ async def create_chat_completion(
                 usage=response.usage,
                 start_time=start_time,
                 status="success",
+                user_id=security_ctx.user_id,
                 messages=request.messages,
                 response_text=response.choices[0].message.content
             )
@@ -888,6 +890,7 @@ async def create_chat_completion(
             usage=None,
             start_time=start_time,
             status="http_error",
+            user_id=security_ctx.user_id,
             messages=request.messages
         )
         raise
@@ -901,6 +904,7 @@ async def create_chat_completion(
             usage=None,
             start_time=start_time,
             status="system_error",
+            user_id=security_ctx.user_id,
             messages=request.messages
         )
         logger.error(f"[{request_id}] 聊天完成失敗: {e}")
@@ -948,7 +952,7 @@ async def chat_health_check():
 
         # check postgres health (non-blocking wrapper)
 
-        from logger_service.db_client import postgres_health
+        from lyrallm.logger_service.db_client import postgres_health
 
         try:
             pg_health = await postgres_health()

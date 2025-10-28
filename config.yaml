@@ -218,6 +218,9 @@ auth:
       permissions:
         - "chat:basic"
       feature_flags: []
+      allowed_models:
+        # - "gpt-4o"
+        - "gpt-oss:20b"
       routing_policies:
         allow_external_providers: false
         preferred_tiers:
@@ -263,7 +266,7 @@ semantic_kernel:
 
 # 事件匯流排配置（可切換 inproc / redis_stream / both）
 event_bus:
-  backend: redis_stream        # 可選: inproc | redis_stream | both
+  backend: inproc        # 可選: inproc | redis_stream | both
                                # - inproc: 使用 process 內的 asyncio.Queue（開發 / 單機）
                                # - redis_stream: 使用 Redis Streams (可靠、consumer group)
                                # - both: 同時 publish 到 inproc 與 redis_stream（方便平滑切換）
@@ -280,9 +283,10 @@ storages:
   analytics:
     type: elasticsearch
     es:
-      endpoint: "http://127.0.0.1:9200"
+      endpoint: "https://127.0.0.1:9200"
       index: "analytics_index"
-
+      username: "elastic"
+      password: "SI=4q-z5T5qLhbwO_lQk"
 # storages:
 #   analytics:
 #     # 擇一選項：將 analytics 儲存在 Postgres 或 Elasticsearch。

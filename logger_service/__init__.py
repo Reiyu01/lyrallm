@@ -18,7 +18,7 @@ __all__ = [
     #'TokenUsageConsumer',
     #'TokenUsageProducer',
     'TokenUsage',
-    'TokenStats'
+    'TokenStats',
     'EventBus',
     'PostgresClient'
 ]
