@@ -39,7 +39,7 @@ logging.basicConfig(
     level=getattr(logging, logging_config.get('level', 'INFO')),
     format=logging_config.get('format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s'),
     handlers=[
-        logging.FileHandler(logging_config.get('file', 'semantic_kernel.log')),
+        logging.FileHandler(logging_config.get('file', 'semantic_kernel.log'), encoding="utf-8"),
         logging.StreamHandler()
     ]
 )

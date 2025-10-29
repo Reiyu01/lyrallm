@@ -85,7 +85,7 @@ class PracticalAgentOrchestrator:
     
 
     
-    async def process_request(self, user_input: str, features: Dict[str, Any] = None) -> str:
+    async def process_request(self, user_input: str, features: Dict[str, Any] = None, security_ctx: Any = None) -> str:
         """
         處理用戶請求 - 使用 ThinkerAgent 作為主控制器
         
@@ -121,7 +121,8 @@ class PracticalAgentOrchestrator:
             final_response = await self.thinker_agent.process_user_query(
                 user_query=user_input,
                 search_agent=self.search_agent if (features and features.get('web_search')) else None,
-                rag_agent=self.rag_agent if self.rag_agent else None
+                rag_agent=self.rag_agent if self.rag_agent else None,
+                security_ctx=security_ctx,
             )
             
             # 記錄最終回應

@@ -326,8 +326,8 @@ if __name__ == "__main__":
     print(f"🎯 GPT-4o Deployment: {os.getenv('AZURE_OPENAI_GPT4O_DEPLOYMENT_NAME', '未設定')}")
     print(f"🎯 O3-Mini Deployment: {os.getenv('AZURE_OPENAI_O3MINI_DEPLOYMENT_NAME', '未設定')}")
     
-    print("\n� 配置狀態:")
-    print("� 基本聊天功能: 已啟用")
+    print("\n🛠️ 配置狀態:")
+    print("💬 基本聊天功能: 已啟用")
     
     print("=" * 60)
     

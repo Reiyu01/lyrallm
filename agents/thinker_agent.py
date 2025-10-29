@@ -157,7 +157,7 @@ class ThinkerAgent:
         self.rag_agent = rag_agent
         logger.info(f"🔗 {self.name} 已連接到 RAGAgent")
     
-    async def process_user_query(self, user_query: str, search_agent=None, rag_agent=None) -> str:
+    async def process_user_query(self, user_query: str, search_agent=None, rag_agent=None, security_ctx: Any = None) -> str:
         """
         處理用戶查詢的主入口點
         
@@ -184,6 +184,16 @@ class ThinkerAgent:
             self.search_history = []
             self.collected_info = {}
             
+            # 解析前端身分（若有），以便下游搜尋能夠進行 RBAC 過濾
+            user_role = None
+            try:
+                if security_ctx:
+                    user_role = getattr(security_ctx, 'requested_role', None) or (getattr(security_ctx, 'role', None).name if getattr(security_ctx, 'role', None) else None)
+                    if isinstance(user_role, str):
+                        user_role = user_role
+            except Exception:
+                user_role = None
+
             # 準備可用工具列表
             available_tools = []
             if self.search_agent:
@@ -207,7 +217,7 @@ class ThinkerAgent:
                 initial_decision = await self._make_initial_decision(user_query, available_tools)
             
             if initial_decision['mode'] == 'DIRECT_ANSWER':
-                logger.info(f"� {self.name} 決定直接回答，不使用特殊工具")
+                logger.info(f"🤔 {self.name} 決定直接回答，不使用特殊工具")
                 return await self._provide_direct_answer(user_query)
             
             # 第二步：分析和制定策略
@@ -215,12 +225,12 @@ class ThinkerAgent:
             
             if strategy['approach'] == 'DIRECT_ANSWER':
                 # 不需要搜尋
-                logger.info("� 無需搜尋，提供直接回答")
+                logger.info("💡 無需搜尋，提供直接回答")
                 return await self._provide_direct_answer(user_query)
             else:
                 # 需要搜尋
-                logger.info("� 啟動多輪搜尋流程")
-                return await self._multi_round_search_process(user_query, strategy)
+                logger.info("🔍 啟動多輪搜尋流程")
+                return await self._multi_round_search_process(user_query, strategy, user_role=user_role)
             
         except Exception as e:
             logger.error(f"❌ {self.name} 處理查詢失敗: {e}")
@@ -405,7 +415,7 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
             logger.error(f"❌ {self.name} 策略分析失敗: {e}")
             return {'approach': 'DIRECT_ANSWER', 'tasks': [], 'priority': 'LOW'}
     
-    async def _multi_round_search_process(self, user_query: str, strategy: Dict[str, Any]) -> str:
+    async def _multi_round_search_process(self, user_query: str, strategy: Dict[str, Any], user_role: Optional[str] = None) -> str:
         """智能多輪搜尋流程 - 讓Agent自主決定何時停止"""
         try:
             max_rounds = 5  # 最多搜尋輪數
@@ -428,7 +438,7 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
                 logger.info(f"🔍 {self.name} 第 {task_index + 1} 輪搜尋 ({current_type}): {current_task[:60]}...")
                 
                 # 等待上一個任務完全完成再開始下一個
-                search_result = await self._execute_search_with_validation(current_task, current_type)
+                search_result = await self._execute_search_with_validation(current_task, current_type, user_role=user_role)
                 
                 # 記錄搜尋結果
                 self.search_history.append({
@@ -474,7 +484,7 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
             logger.error(f"❌ {self.name} 多輪搜尋失敗: {e}")
             return await self._handle_error(user_query, str(e))
     
-    async def _execute_search_with_validation(self, query: str, search_type: str = "WEB") -> Dict[str, Any]:
+    async def _execute_search_with_validation(self, query: str, search_type: str = "WEB", user_role: Optional[str] = None) -> Dict[str, Any]:
         """執行搜尋任務並驗證結果"""
         search_type = search_type.upper()
         logger.info(f"🔍 {self.name} 開始執行 {search_type} 搜尋: {query[:60]}...")
@@ -482,7 +492,7 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
         try:
             if search_type == "RAG" and self.rag_agent:
                 logger.info(f"📚 {self.name} 使用 RAG 搜尋: {query}")
-                search_result = await self.rag_agent.execute_rag_search(query)
+                search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role)
             elif search_type == "WEB" and self.search_agent:
                 logger.info(f"🌐 {self.name} 使用網路搜尋: {query}")
                 search_result = await self.search_agent.execute_search(query)
@@ -493,10 +503,10 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
                     search_result = await self.search_agent.execute_search(query)
                 elif search_type == "WEB" and not self.search_agent and self.rag_agent:
                     logger.warning(f"⚠️ 網路搜尋不可用，降級為 RAG 搜尋: {query}")
-                    search_result = await self.rag_agent.execute_rag_search(query)
+                    search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role)
                 elif self.rag_agent:
                     logger.info(f"🧠 使用 RAG 搜尋: {query}")
-                    search_result = await self.rag_agent.execute_rag_search(query)
+                    search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role)
                 elif self.search_agent:
                     logger.warning(f"⚠️ RAG 不可用，使用網路搜尋: {query}")
                     search_result = await self.search_agent.execute_search(query)
@@ -507,15 +517,16 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
             if not search_result:
                 logger.warning(f"⚠️ {self.name} 搜尋返回空結果")
                 search_result = {'success': False, 'error': '搜尋返回空結果'}
-            
+
             # 記錄到收集的資訊中
             timestamp = len(self.search_history) + 1
             search_result['search_type'] = search_type
             search_result['timestamp'] = timestamp
             self.collected_info[f"search_{timestamp}"] = search_result
-            
-            # 等待一段時間確保任務完全完成
-            await asyncio.sleep(2.0)
+
+            # 只有在搜尋成功的情況下才短暫等待，避免因搜尋失敗而浪費時間導致整體 Agent 超時
+            if search_result.get('success', True):
+                await asyncio.sleep(2.0)
             
             logger.info(f"✅ {self.name} {search_type} 搜尋完成，結果驗證通過")
             return search_result

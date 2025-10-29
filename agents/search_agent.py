@@ -5,7 +5,7 @@ Search Agent - 純搜尋工具版本
 
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
 from semantic_kernel.contents.chat_history import ChatHistory

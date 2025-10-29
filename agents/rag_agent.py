@@ -78,6 +78,49 @@ SUMMARY: [搜尋結果摘要]
 
 
 class RAGAgent:
+    def _ensure_neo4j_driver(self):
+        if hasattr(self, 'neo4j_driver') and self.neo4j_driver is not None:
+            return
+        import os
+        from neo4j import GraphDatabase, basic_auth
+        uri = os.getenv("NEO4J_URI", "bolt://163.18.26.233:7687")
+        username = os.getenv("NEO4J_USERNAME", "neo4j")
+        password = os.getenv("NEO4J_PASSWORD", "secretgraph")
+        self.neo4j_driver = GraphDatabase.driver(uri, auth=basic_auth(username, password))
+        logger.info(f"[RAGAgent] Neo4j driver 已初始化: {uri}")
+
+    def fetch_graph_facts(self, node_ids):
+        self._ensure_neo4j_driver()
+        filtered_ids = [node_id for node_id in node_ids if node_id]
+        if not filtered_ids:
+            logger.info("未提供節點 ID，略過圖譜查詢")
+            return []
+        with self.neo4j_driver.session() as session:
+            nodes = session.run(
+                "MATCH (n) WHERE n.id IN $ids RETURN n.id AS id, labels(n) AS labels, properties(n) AS props",
+                ids=filtered_ids,
+            ).data()
+            relationships = session.run(
+                "MATCH (n)-[r]->(m) WHERE n.id IN $ids RETURN n.id AS start_id, type(r) AS type, m.id AS end_id, properties(r) AS props",
+                ids=filtered_ids,
+            ).data()
+        rel_map = {}
+        for rel in relationships:
+            rel_map.setdefault(rel["start_id"], []).append({
+                "type": rel["type"],
+                "target": rel["end_id"],
+                "properties": rel["props"],
+            })
+        graph_facts = []
+        for node in nodes:
+            graph_facts.append({
+                "node_id": node["id"],
+                "label": ":".join(node["labels"]),
+                "properties": node["props"],
+                "relationships": rel_map.get(node["id"], []),
+            })
+        logger.info(f"取得 {len(graph_facts)} 個圖譜節點")
+        return graph_facts
     """
     RAG 搜尋代理，負責：
     1. 接收搜尋任務和查詢優化
@@ -121,57 +164,57 @@ class RAGAgent:
         
         logger.info(f"🧠 {self.name} RAG 搜尋代理初始化完成")
     
-    async def execute_rag_search(self, search_query: str, context: str = "", top_k: int = 5) -> Dict[str, Any]:
+    async def execute_rag_search(self, search_query: str, context: str = "", top_k: int = 5, node_ids: list = None, use_graph: bool = True, user_role: Optional[str] = None) -> Dict[str, Any]:
         """
         執行 RAG 搜尋的主要入口點
-        
         Args:
             search_query: 搜尋查詢
             context: 背景資訊（可選）
             top_k: 返回結果數量
-            
+            node_ids: (list) 若指定則查詢 Neo4j 圖譜
+            use_graph: (bool) 若 True 則強制查詢 Neo4j
         Returns:
-            {
-                'success': bool,
-                'query_used': str,
-                'optimized_query': str,
-                'embedding_vector': List[float],
-                'search_results': List[Dict],
-                'analyzed_results': Dict,
-                'relevance_scores': List[float],
-                'metadata': Dict,
-                'timestamp': str,
-                'error': str (if failed)
-            }
+            dict: 查詢結果，包含 success, query_used, optimized_query, embedding_vector, search_results, analyzed_results, relevance_scores, metadata, timestamp, error 等欄位。
         """
+        from datetime import datetime
+        timestamp = datetime.now().isoformat()
         try:
             logger.info(f"🧠 {self.name} 開始執行 RAG 搜尋任務")
-            
-            # 確保組件初始化
+            # 若指定 node_ids 或 use_graph，則查詢 Neo4j
+            if use_graph or (node_ids is not None and len(node_ids) > 0):
+                if node_ids is not None and len(node_ids) > 0:
+                    graph_facts = self.fetch_graph_facts(node_ids or [])
+                else:
+                    # 若沒有指定 node_ids，但前端要求使用圖譜，則以文字查詢圖譜
+                    graph_facts = await self._search_graph_by_text(search_query, top_k, user_role=user_role)
+                result = {
+                    'success': True,
+                    'query_used': search_query,
+                    'optimized_query': '',
+                    'embedding_vector': [],
+                    'search_results': graph_facts,
+                    'analyzed_results': {},
+                    'relevance_scores': [],
+                    'metadata': {
+                        'source': 'neo4j',
+                        'total_results': len(graph_facts),
+                        'node_ids': node_ids,
+                        'user_role': user_role,
+                    },
+                    'timestamp': timestamp
+                }
+                logger.info(f"✅ {self.name} Neo4j 圖譜查詢完成")
+                return result
+            # 否則預設走 ES 向量搜尋
             await self._ensure_components_initialized()
-            
-            # 獲取當前時間
-            from datetime import datetime
-            timestamp = datetime.now().isoformat()
-            
-            # 第一步：優化查詢
             optimized_query = await self._optimize_search_query(search_query, context)
             logger.info(f"🎯 {self.name} 優化查詢: {optimized_query}")
-            
-            # 第二步：生成 embedding
             embedding_vector = await self._generate_embedding(optimized_query)
             logger.info(f"🔢 {self.name} 生成 embedding 向量，維度: {len(embedding_vector)}")
-            
-            # 第三步：執行向量搜尋
             search_results = await self._perform_vector_search(embedding_vector, top_k)
             logger.info(f"🔍 {self.name} 找到 {len(search_results)} 個相關結果")
-            
-            # 第四步：分析搜尋結果
             analyzed_results = await self._analyze_search_results(search_results, search_query)
-            
-            # 第五步：提取相關性評分
             relevance_scores = self._extract_relevance_scores(search_results)
-            
             result = {
                 'success': True,
                 'query_used': search_query,
@@ -191,10 +234,8 @@ class RAGAgent:
                 },
                 'timestamp': timestamp
             }
-            
             logger.info(f"✅ {self.name} RAG 搜尋完成")
             return result
-            
         except Exception as e:
             logger.error(f"❌ {self.name} RAG 搜尋失敗: {e}")
             return {
@@ -207,77 +248,264 @@ class RAGAgent:
                 'analyzed_results': {},
                 'relevance_scores': [],
                 'metadata': {},
-                'timestamp': timestamp if 'timestamp' in locals() else 'Unknown'
+                'timestamp': timestamp
             }
     
     async def _ensure_components_initialized(self):
         """確保 embedding provider 和 ES adapter 已初始化"""
         if self._initialized:
             return
-        
         try:
             # 初始化 embedding provider
             if self.embedding_provider is None:
                 self.embedding_provider = get_default_provider()
                 logger.info(f"🔤 {self.name} Embedding provider 已初始化")
-            
             # 初始化 Elasticsearch adapter
             if self.elasticsearch_adapter is None:
                 self.elasticsearch_adapter = ElasticsearchAdapter()
                 await self.elasticsearch_adapter.ensure_index()
                 logger.info(f"🗄️ {self.name} Elasticsearch adapter 已初始化")
-            
             self._initialized = True
-            logger.info(f"✅ {self.name} 所有組件初始化完成")
-            
         except Exception as e:
             logger.error(f"❌ {self.name} 組件初始化失敗: {e}")
             raise
-    
-    async def _optimize_search_query(self, search_query: str, context: str) -> str:
-        """優化搜尋查詢"""
+
+    async def _optimize_search_query(self, search_query: str, context: str = "") -> str:
+        """使用 chat service 對查詢進行優化，返回優化後的查詢字串。
+
+        嘗試呼叫語言模型以產生一個適合向量搜尋的簡潔查詢（或關鍵字序列）。
+        若優化失敗或回應不可解析，會 fallback 回原始 search_query。
+        """
         try:
             chat_history = ChatHistory()
             chat_history.add_user_message(f"""
-你是一個 RAG 搜尋專家，需要優化查詢以獲得最相關的知識庫結果。
+你是一個 RAG 搜尋優化器，請將用戶查詢轉換為最適合向量搜尋的查詢或關鍵字序列。
 
 用戶查詢: {search_query}
 背景資訊: {context}
 
-請分析並提供：
-1. **核心概念**: 提取查詢中的關鍵概念和實體
-2. **搜尋關鍵字**: 最適合向量搜尋的關鍵字組合
-3. **相關主題**: 可能相關的主題或概念
-4. **查詢意圖**: 用戶想要獲得的資訊類型
-
-請按此格式回應：
-CORE_CONCEPTS: [核心概念1, 概念2, 概念3]
-SEARCH_KEYWORDS: [優化後的搜尋關鍵字]
-RELATED_TOPICS: [相關主題1, 主題2, 主題3]
-QUERY_INTENT: [資訊檢索意圖說明]
-SEARCH_STRATEGY: [向量搜尋策略]
+請回傳一個標籤行：OPTIMIZED_QUERY: <優化後的查詢或關鍵字>
+如果無法優化，請回傳 OPTIMIZED_QUERY: <原始查詢>
 """)
-            
+
             response = await safe_chat_completion(
                 self.chat_service,
                 chat_history,
-                smart_settings(
-                    self.chat_service,
-                    max_completion_tokens=500,
-                    temperature=0.3
-                )
+                smart_settings(self.chat_service, max_completion_tokens=200, temperature=0.0)
             )
-            
+
             if response and len(response) > 0:
-                optimization_result = response[0].content
-                return self._extract_search_keywords(optimization_result, search_query)
-            else:
-                logger.warning(f"⚠️ {self.name} 查詢優化回應為空，使用原始查詢")
-                return search_query
-                
+                text = response[0].content or ""
+                # 嘗試解析 OPTIMIZED_QUERY 標籤
+                for line in text.splitlines():
+                    if 'OPTIMIZED_QUERY:' in line:
+                        return line.split('OPTIMIZED_QUERY:')[1].strip()
+                # 嘗試解析 SEARCH_KEYWORDS
+                for line in text.splitlines():
+                    if 'SEARCH_KEYWORDS:' in line:
+                        return line.split('SEARCH_KEYWORDS:')[1].strip()
+                # 否則回傳整段文字作為優化結果
+                return text.strip()
+
         except Exception as e:
-            logger.error(f"❌ {self.name} 查詢優化失敗: {e}")
-            return search_query
+            logger.warning(f"⚠️ {self.name} 查詢優化失敗，使用原始查詢: {e}")
+
+        return search_query
+
+    async def _search_graph_by_text(self, text_query: str, top_k: int = 5, user_role: Optional[str] = None) -> List[Dict[str, Any]]:
+        """在 Neo4j 中以文字搜尋節點。
+
+        此方法會嘗試搜尋節點的各個字串屬性（不使用全文索引時的 fallback），
+        並回傳與節點相關的結構化資訊（properties, labels, relationships）。
+        若 Neo4j 未設定或查詢失敗，回傳空列表。
+        """
+        try:
+            self._ensure_neo4j_driver()
+        except Exception as e:
+            logger.warning(f"⚠️ {self.name} 無法初始化 Neo4j driver: {e}")
+            return []
+
+        # 根據查詢內容決定查詢策略：
+        # - 如果查詢與權限 (permission/權限/role) 相關，優先搜尋 Permission 標籤的節點或常用欄位
+        # - 否則使用較寬鬆的屬性包含檢查作為 fallback
+        q_lower = (text_query or "").lower()
+
+        # 若傳入 user_role，先檢查該角色是否允許使用 rag_search（防止前端傳入身分但無權限存取圖譜）
+        try:
+            if user_role:
+                role_cfg = config_manager.get_role_config(user_role)
+                if role_cfg is None:
+                    logger.warning(f"⚠️ {self.name} 未找到角色設定: {user_role}，拒絕圖譜查詢")
+                    return []
+                flags = [f.lower() for f in role_cfg.get('feature_flags', []) or []]
+                # 支援多種命名（rag_search / use:rag_search / web_search）以兼容現有 config
+                if 'rag_search' not in flags and 'web_search' not in flags and 'use:rag_search' not in flags:
+                    logger.info(f"🔒 {self.name} 角色 '{user_role}' 未啟用 rag_search 功能，拒絕圖譜查詢")
+                    return []
+        except Exception as e:
+            logger.warning(f"⚠️ {self.name} 檢查角色許可時發生錯誤: {e}")
+
+        # 建立權限/角色關鍵字清單，優先使用 config.yaml 中定義的 role 名稱與 permission
+        permission_keywords = ['權限', 'permission', 'role', '角色']
+        try:
+            roles_conf = config_manager.get_roles_config() or {}
+            # 角色名稱（如 admin, security_officer 等）
+            role_names = [r.lower() for r in roles_conf.keys()]
+            # 權限字串（如 manage:roles, view:audit_logs 等）
+            perm_values = []
+            for r in roles_conf.values():
+                for p in r.get('permissions', []) or []:
+                    if isinstance(p, str):
+                        perm_values.append(p.lower())
+            permission_keywords.extend(role_names)
+            permission_keywords.extend(perm_values)
+        except Exception:
+            # 若讀取配置失敗，保留基本關鍵字
+            role_names = []
+
+        # 如果查詢看起來與權限或角色相關，優先搜尋 Permission/Role 節點與常見欄位
+        if any(k in q_lower for k in permission_keywords if k):
+            cypher = (
+                "MATCH (n) WHERE ( 'Permission' IN labels(n) OR 'Role' IN labels(n) "
+                "OR toLower(coalesce(n.role, '')) <> '' OR toLower(coalesce(n.name, '')) <> '') AND ("
+                "toLower(coalesce(n.name, '')) CONTAINS toLower($q) "
+                "OR toLower(coalesce(n.role, '')) CONTAINS toLower($q) "
+                "OR toLower(coalesce(n.description, '')) CONTAINS toLower($q) ) "
+                "RETURN n.id AS id, labels(n) AS labels, properties(n) AS props LIMIT $limit"
+            )
+        else:
+            # 通用 fallback（更安全）：只搜尋常見的字串屬性，並安全處理陣列屬性
+            # 設定要搜尋的字串欄位（可按需擴充）
+            string_props = ['name','title','description','content','role','visibility','summary']
+            prop_checks = [f"toLower(coalesce(n.{p}, '')) CONTAINS toLower($q)" for p in string_props]
+
+            # 對於可能為陣列的欄位，使用 any(...) 逐項比較（避免直接對整個陣列呼叫 toString())
+            # Neo4j 4.x+ 已廢棄 exists(variable.property) 語法，改用 `variable.property IS NOT NULL`
+            list_checks = [
+                "(n.allowed_roles IS NOT NULL AND any(x IN n.allowed_roles WHERE toLower(toString(x)) CONTAINS toLower($q)))",
+                "(n.effective_allowed_roles IS NOT NULL AND any(x IN n.effective_allowed_roles WHERE toLower(toString(x)) CONTAINS toLower($q)))",
+                "(n.restricted_roles IS NOT NULL AND any(x IN n.restricted_roles WHERE toLower(toString(x)) CONTAINS toLower($q)))"
+            ]
+
+            where_clause = " OR ".join(prop_checks + list_checks)
+            cypher = (
+                "MATCH (n) WHERE " + where_clause + " RETURN n.id AS id, labels(n) AS labels, properties(n) AS props LIMIT $limit"
+            )
+
+        results = []
+        try:
+            with self.neo4j_driver.session() as session:
+                records = session.run(cypher, q=text_query, limit=top_k).data()
+            if not records:
+                return []
+
+            # 為每個節點抓取關係（最多 top_k 節點）
+            node_ids = [r['id'] for r in records if r.get('id')]
+            rels = []
+            if node_ids:
+                with self.neo4j_driver.session() as session:
+                    rels = session.run(
+                        "MATCH (n)-[r]->(m) WHERE n.id IN $ids RETURN n.id AS start_id, type(r) AS type, m.id AS end_id, properties(r) AS props",
+                        ids=node_ids
+                    ).data()
+
+            rel_map = {}
+            for rel in rels:
+                rel_map.setdefault(rel['start_id'], []).append({
+                    'type': rel['type'],
+                    'target': rel['end_id'],
+                    'properties': rel.get('props', {})
+                })
+
+            for rec in records:
+                nid = rec.get('id')
+                results.append({
+                    'node_id': nid,
+                    'label': ':'.join(rec.get('labels', [])),
+                    'properties': rec.get('props', {}),
+                    'relationships': rel_map.get(nid, [])
+                })
+
+            # 若前端提供了 user_role，根據常見欄位做 RBAC 過濾（參考 rag_graph 範例）
+            if user_role:
+                filtered: list[Dict[str, Any]] = []
+                ur = str(user_role).lower()
+                for node in results:
+                    props = node.get('properties') or {}
+                    # 常見欄位名稱：allowed_roles / effective_allowed_roles /restricted_roles / visibility
+                    allowed = []
+                    restricted = []
+                    # 支援多種存放格式：字串、list、JSON 字串
+                    def _normalize_roles(value):
+                        if value is None:
+                            return []
+                        if isinstance(value, str):
+                            try:
+                                # 可能是 JSON 陣列字串
+                                parsed = json.loads(value)
+                                if isinstance(parsed, list):
+                                    return [str(x).lower() for x in parsed]
+                            except Exception:
+                                # 逗號分隔或單一字串
+                                return [s.strip().lower() for s in value.split(',') if s.strip()]
+                        if isinstance(value, (list, tuple, set)):
+                            return [str(x).lower() for x in value]
+                        return [str(value).lower()]
+
+                    for k in ('effective_allowed_roles', 'allowed_roles', 'allowed', 'visible_to'):
+                        if k in props:
+                            allowed.extend(_normalize_roles(props.get(k)))
+
+                    for k in ('restricted_roles', 'restricted', 'blocked_roles'):
+                        if k in props:
+                            restricted.extend(_normalize_roles(props.get(k)))
+
+                    # visibility 處理（例如 'public' / 'private'）
+                    visibility = str(props.get('visibility', '')).lower()
+
+                    # 判斷邏輯：若在 restricted 則排除；若 allowed 非空則必須在 allowed 內；若 allowed 為空且 visibility=='private' 並且非 admin，則排除
+                    if ur in restricted:
+                        continue
+
+                    if allowed:
+                        if ur not in allowed:
+                            continue
+                    else:
+                        if visibility == 'private' and ur != 'admin':
+                            # 非 admin 無法看到 private 節點
+                            continue
+
+                    # 針對關係也做相同過濾（若關係上標註了 allowed/restricted）
+                    rels = []
+                    for r in node.get('relationships', []):
+                        rprops = r.get('properties', {}) or {}
+                        r_allowed = []
+                        r_restricted = []
+                        for k in ('allowed_roles', 'effective_allowed_roles', 'allowed'):
+                            if k in rprops:
+                                r_allowed.extend(_normalize_roles(rprops.get(k)))
+                        for k in ('restricted_roles', 'restricted'):
+                            if k in rprops:
+                                r_restricted.extend(_normalize_roles(rprops.get(k)))
+
+                        if ur in r_restricted:
+                            # skip this relationship
+                            continue
+                        if r_allowed and ur not in r_allowed:
+                            continue
+                        rels.append(r)
+
+                    node['relationships'] = rels
+                    filtered.append(node)
+
+                results = filtered
+
+            logger.info(f"🔎 {self.name} 在圖譜中找到 {len(results)} 個節點與查詢: {text_query}")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ {self.name} 圖譜文字搜尋失敗: {e}")
+            return []
     
     def _extract_search_keywords(self, optimization_result: str, fallback: str) -> str:
         """從優化結果中提取搜尋關鍵字"""

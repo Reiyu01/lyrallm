@@ -26,23 +26,36 @@ def _get_es_config():
     analytics_cfg = storages_cfg.get('analytics', {}) or {}
     es_storage = storages_cfg.get('elasticsearch', {}) or {}
     use_vector_cfg = True
-    if not es_storage:
-        if isinstance(analytics_cfg, dict):
-            analytics_type = (
-                analytics_cfg.get('type')
-                or analytics_cfg.get('adapter')
-                or analytics_cfg.get('backend')
-            )
-            if analytics_type and analytics_type.lower() == 'elasticsearch':
-                es_storage = analytics_cfg.get('es') or analytics_cfg
-                use_vector_cfg = False
-    elif isinstance(es_storage, dict) and 'es' in es_storage:
-        # allow nesting similar to analytics config for consistency
-        es_storage = es_storage.get('es') or es_storage
-        use_vector_cfg = False
+    # If vectordb explicitly configures provider=elasticsearch and provides an endpoint,
+    # prefer vectordb over storages.elasticsearch so RAG/vector code uses the vectordb settings.
+    prefer_vector = False
+    if isinstance(vector_cfg, dict) and str(vector_cfg.get('provider', '')).lower() == 'elasticsearch' and vector_cfg.get('endpoint'):
+        prefer_vector = True
+
+    # If we prefer vectordb, keep use_vector_cfg True and ignore storages.elasticsearch
+    if prefer_vector:
+        # vectordb explicitly configured as elasticsearch — prefer it
+        es_storage = {}
+        use_vector_cfg = True
     else:
-        # explicit storages.elasticsearch should take precedence over vector_cfg values
-        use_vector_cfg = False
+        # Only consult analytics/storage settings when not preferring vectordb
+        if not es_storage:
+            if isinstance(analytics_cfg, dict):
+                analytics_type = (
+                    analytics_cfg.get('type')
+                    or analytics_cfg.get('adapter')
+                    or analytics_cfg.get('backend')
+                )
+                if analytics_type and analytics_type.lower() == 'elasticsearch':
+                    es_storage = analytics_cfg.get('es') or analytics_cfg
+                    use_vector_cfg = False
+        elif isinstance(es_storage, dict) and 'es' in es_storage:
+            # allow nesting similar to analytics config for consistency
+            es_storage = es_storage.get('es') or es_storage
+            use_vector_cfg = False
+        else:
+            # explicit storages.elasticsearch should take precedence over vector_cfg values
+            use_vector_cfg = False
 
     fallback_cfg = vector_cfg if use_vector_cfg else {}
 

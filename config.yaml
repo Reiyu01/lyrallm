@@ -150,7 +150,7 @@ auth:
         - "configure:integrations"
       feature_flags:
         - "web_search"
-        - "code_interpreter"
+        - "rag_search"
         - "image_generation"
         - "external_connectors"
       routing_policies:
@@ -201,11 +201,11 @@ auth:
       inherits: ["standard_user"]
       permissions:
         - "use:web_search"
-        - "use:code_interpreter"
+        - "use:rag_search"
         - "request:advanced_features"
       feature_flags:
         - "web_search"
-        - "code_interpreter"
+        - "rag_search"
       routing_policies:
         allow_external_providers: true
         preferred_tiers:
@@ -309,14 +309,24 @@ storages:
 # Vector DB configuration (high-level routing / vector store options)
 vectordb:
   provider: "elasticsearch"   # supported: elasticsearch (future: qdrant, milvus, weaviate)
-  endpoint: "http://127.0.0.1:9200"
-  api_key: "NHNGVnRaa0JlSDE4Z0FYUFZaa0w6NzU5MzlTRFY3V2tCSHdjSU51ZEQ0UQ=="
+  endpoint: "http://163.18.26.233:9200"
+  # Using username/password authentication below. If you prefer API key auth,
+  # set `api_key` instead and remove username/password.
+  username: "elastic"
+  password: "s271QuXZ"
   #api_key: ${ES_LOCAL_API_KEY}
+# vectordb:
+#   provider: "elasticsearch"   # supported: elasticsearch (future: qdrant, milvus, weaviate)
+#   endpoint: "http://127.0.0.1:9200"
+#   api_key: "NHNGVnRaa0JlSDE4Z0FYUFZaa0w6NzU5MzlTRFY3V2tCSHdjSU51ZEQ0UQ=="
+#   #api_key: ${ES_LOCAL_API_KEY}
 
   index: "semantic_index"
   embedding_dims: 1536
   top_k: 5
-
+# If you prefer environment variables, set ES_HOST/ES_USERNAME/ES_PASSWORD or
+# ES_API_KEY in your environment or a .env file. Do NOT append raw ENV lines
+# into this YAML file.
 
 embeddings:
   provider: azure_openai
