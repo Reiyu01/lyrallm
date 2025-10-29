@@ -180,7 +180,7 @@ class SLMAnalyzer:
             if s_category_parsed:
                 # 使用 S-category 格式
                 logger.info("Using S-category format output")
-                intent = s_category_parsed.get('intent', 'qa_general')
+                intent = s_category_parsed.get('intent', 'open_qa')
                 confidence = s_category_parsed.get('confidence', 0.6)
                 complexity = s_category_parsed.get('complexity_score', 3.0)
                 
@@ -201,7 +201,7 @@ class SLMAnalyzer:
                 # 嘗試解析 JSON 格式（舊格式）
                 logger.info("Using JSON format output")
                 parsed = self._safe_parse_json(text)
-                intent = str(parsed.get('intent') or 'qa_general')
+                intent = str(parsed.get('intent') or 'open_qa')
                 confidence = float(parsed.get('confidence') or 0.6)
                 complexity = float(parsed.get('complexity_score') or 3.0)
                 
@@ -229,7 +229,7 @@ class SLMAnalyzer:
             )
             return result
         except Exception as e:
-            logger.warning(f"SLMAnalyzer failed, fallback to qa_general: {e}")
+            logger.warning(f"SLMAnalyzer failed, fallback to open_qa: {e}")
             
             # 降級時也提供安全的預設值
             fallback_tools = None
@@ -241,7 +241,7 @@ class SLMAnalyzer:
                     fallback_safety = SafetyLabels.create_safe_default()
             
             return IntentResult(
-                intent='qa_general', 
+                intent='open_qa', 
                 confidence=0.5, 
                 complexity=3.0,
                 ms=int((time.time() - start) * 1000), 
@@ -347,7 +347,7 @@ class SLMAnalyzer:
                         'data_analysis': 6.0,
                         'creative_writing': 5.0,
                         'text_summary': 4.0,
-                        'qa_general': 3.0
+                        'open_qa': 3.0
                     }
                     complexity = complexity_mapping.get(intent_temp, 3.0)
                 

@@ -54,7 +54,7 @@ class RuleEngineV1:
         intents_cfg = self.rules.get('intents') or {}
         key_intent = intent
         if confidence < confidence_floor or key_intent not in intents_cfg:
-            key_intent = 'qa_general'
+            key_intent = 'open_qa'
 
         intent_cfg = intents_cfg.get(key_intent) or {}
         threshold = float(intent_cfg.get('threshold', 5.0))
