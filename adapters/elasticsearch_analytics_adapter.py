@@ -4,9 +4,21 @@ Implements async connect/close/write_token_usage/query_token_usage so it
 can be used interchangeably with PostgresAdapter via the factory.
 """
 from typing import Dict, Any, List, Optional
+
 import logging
 from .es_client import get_es_client, get_es_index
 from lyrallm.config.config_manager import config_manager
+
+#10/28 與agent合併
+import hashlib
+from elasticsearch import AsyncElasticsearch
+import asyncio
+import json
+from datetime import datetime, timezone
+from typing import Dict, Any, List
+import traceback
+
+
 
 logger = logging.getLogger(__name__)
 
