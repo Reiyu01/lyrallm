@@ -44,7 +44,6 @@ logs/
 Thumbs.db
 
 # Semantic Kernel 相關
-plugins/
 memory/
 *.db
 *.sqlite
