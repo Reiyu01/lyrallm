@@ -12,7 +12,8 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAICha
 from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
 from semantic_kernel.contents.chat_message_content import ChatMessageContent
 from semantic_kernel.contents.chat_history import ChatHistory
-from config.config_manager import config_manager
+#from config.config_manager import config_manager
+from lyrallm.config.config_manager import config_manager
 from .smart_parameter_manager import smart_settings
 
 # 導入新的獨立 Agent

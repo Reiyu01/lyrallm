@@ -492,7 +492,7 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
         try:
             if search_type == "RAG" and self.rag_agent:
                 logger.info(f"📚 {self.name} 使用 RAG 搜尋: {query}")
-                search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role)
+                search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role,use_graph=True)
             elif search_type == "WEB" and self.search_agent:
                 logger.info(f"🌐 {self.name} 使用網路搜尋: {query}")
                 search_result = await self.search_agent.execute_search(query)
@@ -503,10 +503,10 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
                     search_result = await self.search_agent.execute_search(query)
                 elif search_type == "WEB" and not self.search_agent and self.rag_agent:
                     logger.warning(f"⚠️ 網路搜尋不可用，降級為 RAG 搜尋: {query}")
-                    search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role)
+                    search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role,use_graph=True)
                 elif self.rag_agent:
                     logger.info(f"🧠 使用 RAG 搜尋: {query}")
-                    search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role)
+                    search_result = await self.rag_agent.execute_rag_search(query, user_role=user_role,use_graph=True)
                 elif self.search_agent:
                     logger.warning(f"⚠️ RAG 不可用，使用網路搜尋: {query}")
                     search_result = await self.search_agent.execute_search(query)

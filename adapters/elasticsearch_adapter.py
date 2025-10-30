@@ -34,7 +34,7 @@ class ElasticsearchAdapter:
                         }
                     }
                 }
-                await self.es.indices.create(index=self.index, body=mapping)
+                await self.es.indices.create(index=self.index, body=mapping, request_timeout=30)
         except Exception as e:
             logger.exception(f"ensure_index failed: {e}")
 
@@ -54,11 +54,25 @@ class ElasticsearchAdapter:
                 "script_score": {
                     "query": {"match_all": {}},
                     "script": {
-                        "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                        # guard the script with try/catch to avoid runtime errors when documents
+                        # have missing/incorrect embedding fields
+                        "source": "double s = 0.0; try { s = cosineSimilarity(params.query_vector, 'embedding') + 1.0; } catch (Exception e) { s = 0.0; } return s;",
                         "params": {"query_vector": vector}
                     }
                 }
             }
         }
-        res = await self.es.search(index=self.index, body=query)
-        return res.get("hits", {}).get("hits", [])
+        # Increase request timeout to handle heavier vector/script_score queries
+        try:
+            res = await self.es.search(index=self.index, body=query, request_timeout=30)
+            return res.get("hits", {}).get("hits", [])
+        except Exception as e:
+            logger.exception(f"search_by_vector failed: {e}")
+            # Try to include more details when available
+            try:
+                err_text = getattr(e, 'info', None) or getattr(e, 'args', None) or str(e)
+                logger.error("Elasticsearch error details: %s", err_text)
+            except Exception:
+                pass
+            # On failure return empty results rather than crash caller
+            return []

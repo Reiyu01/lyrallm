@@ -2,20 +2,17 @@ import asyncio
 import json
 import logging
 from types import SimpleNamespace
-from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
 from pathlib import Path
 import sys
 
-# Resilient import pattern so this script works when run both as a module
+# Resilient import pattern so this script works both as a module
 # (python -m lyrallm.tools.run_rag_test) and as a plain script
 try:
     from lyrallm.agents.rag_agent import RAGAgent
 except Exception:
     try:
-        # try importing as a top-level package inside the repo
         from agents.rag_agent import RAGAgent
     except Exception:
-        # add repo root to sys.path and retry
         repo_root = Path(__file__).resolve().parents[2]
         lyrallm_pkg = Path(__file__).resolve().parents[1]  # repo_root/lyrallm
         # ensure both repo root and the lyrallm package dir are on sys.path
@@ -25,20 +22,39 @@ except Exception:
             sys.path.insert(0, str(lyrallm_pkg))
         from agents.rag_agent import RAGAgent
 
+# Attempt to disable RagGraphAdapter for this test run so the agent uses the vector search path
+try:
+    import importlib
+    try:
+        rag_mod = importlib.import_module('lyrallm.agents.rag_agent')
+    except Exception:
+        rag_mod = importlib.import_module('agents.rag_agent')
+    setattr(rag_mod, 'RagGraphAdapter', None)
+    logging.info('Disabled RagGraphAdapter for this test run to force vector search')
+except Exception:
+    logging.info('Could not disable RagGraphAdapter; proceeding with default agent behavior')
+
 logging.basicConfig(level=logging.INFO)
 
 
-class DummyChatService(ChatCompletionClientBase):
-    """Minimal stub implementing ChatCompletionClientBase for testing.
+# Try to import the ChatCompletionClientBase used by the agent's pydantic model.
+# If it's not available, fall back to a tiny base class so our stub still works.
+try:
+    from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
+except Exception:
+    class ChatCompletionClientBase:  # type: ignore
+        pass
 
-    Provide minimal required model fields so pydantic validation succeeds.
+
+class DummyChatService(ChatCompletionClientBase):
+    """Stub that mimics the minimal surface the agent expects.
+
+    Subclassing `ChatCompletionClientBase` (when available) satisfies pydantic
+    validation performed by the agent framework.
     """
-    # ChatCompletionClientBase is a pydantic model in semantic-kernel; set
-    # a minimal required field so validation passes.
     ai_model_id: str = "test-model"
 
     async def get_chat_message_contents(self, chat_history=None, settings=None):
-        # Return an object with a .content attribute as expected by the agent
         return [SimpleNamespace(content="OPTIMIZED_QUERY: test optimized query")]
 
 

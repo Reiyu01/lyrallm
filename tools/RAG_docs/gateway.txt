@@ -1,0 +1,52 @@
+智慧多模型路由與安全護欄系統（Smart Multi-LLM Routing & Guardrail System）
+
+文件版本：v1.0
+文件類型：內部技術白皮書（Internal Technical Whitepaper）
+編寫單位：AI Platform Department
+更新日期：2025-10-28
+
+一、專案背景與目的
+
+隨著大型語言模型（Large Language Models, LLM）在企業應用中迅速普及，不同模型在成本、延遲與任務能力之間的差異愈發明顯。
+在實際應用中，我們觀察到三個核心問題：
+
+任務匹配困難：使用者的輸入內容差異極大，同一個模型難以在程式碼生成、資料查詢、對話輔助之間平衡效果。
+
+安全審查瓶頸：模型回應中可能出現公司內部資訊、機密代碼或政策不符的內容，風險不可忽視。
+
+效能與成本權衡：若每則請求都使用大型模型處理，將造成雲端成本與延遲的劇增。
+
+為此，本專案提出「智慧多模型路由與安全護欄系統」的設計概念：
+透過一個中央 Gateway，自動分析使用者意圖、風險等級與任務特性，
+再將請求導向最合適的模型，同時確保輸入與輸出均通過安全審查。
+二、系統架構概述
+
+整體系統採用 雙層智慧決策架構（Two-Tier Routing Architecture），由以下模組構成：
+
+(1) 🧭 Arch Router — 任務導向分流器
+
+主要負責解析使用者輸入的「任務類型」（如程式開發、RAG 查詢、對話輔助等）。
+
+使用輕量模型（如 Phi-4-mini / o3-mini）進行分類，依據設定檔 router_config.yaml 對應到具體 LLM。
+
+路由決策結果會暫存在 Redis Cache，以降低多輪對話重複判斷的開銷。
+
+(2) 🛡️ Llama Guard — 安全審查層
+
+採用 Meta 開源的 Llama Guard 模型（8B 或蒸餾版本）。
+
+檢查輸入與輸出中的風險類別（暴力、政治、醫療、個資、越權、Prompt Injection 等）。
+
+在預設情境下為非同步執行，異常時才觸發同步審查以防止資料外洩。
+
+(3) 🌐 Gateway API 層
+
+使用 FastAPI 建立統一入口，負責任務協調、串流回傳（StreamingResponse）、與後端模型服務溝通。
+
+具備 JWT 驗證機制與使用者身分標記（email、role），並將使用量統計寫入 ELK Stack。
+
+(4) 💾 Logging & Policy Layer
+
+整合 ElasticSearch + Kibana 進行記錄與可視化。
+
+具備後續接入 Open Policy Agent (OPA) 的擴充介面，以支持更細緻的企業安全策略管理。

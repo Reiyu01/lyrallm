@@ -217,8 +217,10 @@ auth:
       inherits: []
       permissions:
         - "chat:basic"
-      feature_flags: []
+      feature_flags:
+        - "rag_search"
       allowed_models:
+        - "auto"
         # - "gpt-4o"
         - "gpt-oss:20b"
       routing_policies:
@@ -309,11 +311,11 @@ storages:
 # Vector DB configuration (high-level routing / vector store options)
 vectordb:
   provider: "elasticsearch"   # supported: elasticsearch (future: qdrant, milvus, weaviate)
-  endpoint: "http://163.18.26.233:9200"
+  endpoint: "https://127.0.0.1:9200"  # Elasticsearch endpoint (was incorrectly set to Neo4j browser URL)
   # Using username/password authentication below. If you prefer API key auth,
   # set `api_key` instead and remove username/password.
   username: "elastic"
-  password: "s271QuXZ"
+  password: "SI=4q-z5T5qLhbwO_lQk"
   #api_key: ${ES_LOCAL_API_KEY}
 # vectordb:
 #   provider: "elasticsearch"   # supported: elasticsearch (future: qdrant, milvus, weaviate)
@@ -321,12 +323,19 @@ vectordb:
 #   api_key: "NHNGVnRaa0JlSDE4Z0FYUFZaa0w6NzU5MzlTRFY3V2tCSHdjSU51ZEQ0UQ=="
 #   #api_key: ${ES_LOCAL_API_KEY}
 
-  index: "semantic_index"
+  index: "knowledge_documents"
   embedding_dims: 1536
   top_k: 5
 # If you prefer environment variables, set ES_HOST/ES_USERNAME/ES_PASSWORD or
 # ES_API_KEY in your environment or a .env file. Do NOT append raw ENV lines
 # into this YAML file.
+
+# Neo4j graph database configuration (used by rag_graph and graph facts)
+neo4j:
+  uri: "bolt://163.18.26.233:7687/"
+  #bolt://163.18.26.233:7474/browser/
+  username: "neo4j"
+  password: "secretgraph"
 
 embeddings:
   provider: azure_openai

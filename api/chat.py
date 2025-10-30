@@ -12,7 +12,6 @@ import httpx
 from lyrallm.auth.dependencies import RequestSecurityContext, get_request_security_context
 from lyrallm.config.config_manager import config_manager
 from lyrallm.core import get_default_executor
-
 # Token tracking imports - 高性能版本
 
 from lyrallm.logger_service import TokenUsage
@@ -193,11 +192,11 @@ def _log_plugin_status(self, kernel: sk.Kernel, model_name: str):
             for plugin in plugins:
                 try:
 
-                    # å®‰å…¨åœ°ç²å– plugin è³‡è¨Š
+
 
                     plugin_name = getattr(plugin, 'name', str(plugin))
 
-                    # å˜—è©¦ç²å– functions è³‡è¨Š
+
 
                     functions = []
                     if hasattr(plugin, 'functions'):
@@ -224,7 +223,7 @@ def _analyze_response_metadata(self, response, model_name: str) -> dict:
     }
     try:
 
-        # æª¢æŸ¥æ˜¯å¦æœ‰ metadata
+        # 檢查是否有 metadata
 
         if response and len(response) > 0 and hasattr(response[0], 'metadata') and response[0].metadata:
             function_calls = response[0].metadata.get('function_calls', [])
@@ -241,13 +240,13 @@ def _analyze_response_metadata(self, response, model_name: str) -> dict:
     return metadata
 
 async def get_kernel_for_model(self, model_name: str, features: Optional[Features] = None) -> sk.Kernel:
-    """å–å¾—æŒ‡å®šæ¨¡åž‹çš„ Semantic Kernel å¯¦ä¾‹ï¼Œæ ¹æ“š features å‹•æ…‹è¼‰å…¥ plugins"""
+    """獲取指定模型的 Semantic Kernel 實例，根據 features 動態加載 plugins"""
 
-    # å‰µå»ºåŸºç¤Ž kernelï¼ˆä¸åŒ…å« pluginsï¼‰
+    # 構建基本 kernel（不包含 plugins）
 
     kernel = await self._get_base_kernel_for_model(model_name)
 
-    # æ ¹æ“š features å‹•æ…‹è¼‰å…¥ plugins
+    # 根據 features 動態加載 plugins
 
     if features:
         plugins_count = await self._load_plugins(kernel, model_name, features)
@@ -258,28 +257,28 @@ async def get_kernel_for_model(self, model_name: str, features: Optional[Feature
     return kernel
 
 async def _get_base_kernel_for_model(self, model_name: str) -> sk.Kernel:
-    """å–å¾—æŒ‡å®šæ¨¡åž‹çš„åŸºç¤Ž Semantic Kernel å¯¦ä¾‹ï¼ˆä¸åŒ…å« pluginsï¼‰"""
+    """獲取指定模型的基本 Semantic Kernel 實例（不包含 plugins）"""
 
-    # åŸºç¤Ž kernel å¯ä»¥å¿«å–ï¼Œå› ç‚ºå®ƒä¸åŒ…å« plugins
+    # 基本 kernel 可以快速獲取，因為它不包含 plugins
 
     cache_key = f"base_{model_name}"
     if cache_key in self.kernels:
 
-        # è¿”å›žåŸºç¤Ž kernel çš„å‰¯æœ¬ï¼Œé¿å…æ±¡æŸ“å¿«å–
+        # 返回基礎 kernel 的副本，避免污染快取
 
         base_kernel = self.kernels[cache_key]
 
-        # å‰µå»ºæ–°çš„ kernel å¯¦ä¾‹ï¼Œä½†ä½¿ç”¨ç›¸åŒçš„æœå‹™é…ç½®
+        # 構建新的 kernel 副本，但使用相同的服務配置
 
         new_kernel = sk.Kernel()
 
-        # è¤‡è£½æœå‹™
+        # 複製服務
 
         for service in base_kernel.services.values():
             new_kernel.add_service(service)
         return new_kernel
 
-    # å‰µå»ºæ–°çš„ kernel
+    # 創建新的 kernel
 
     kernel = sk.Kernel()
     model_config = config_manager.get_model_by_name(model_name)
@@ -330,11 +329,11 @@ async def _get_base_kernel_for_model(self, model_name: str) -> sk.Kernel:
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
-    # å¿«å–åŸºç¤Ž kernel
+    # 緩存基礎 kernel
 
     self.kernels[cache_key] = kernel
 
-    # è¿”å›žå‰¯æœ¬
+    # 返回副本
 
     new_kernel = sk.Kernel()
     for service in kernel.services.values():
@@ -344,20 +343,20 @@ async def _get_base_kernel_for_model(self, model_name: str) -> sk.Kernel:
 async def create_chat_completion(self, model_name: str, messages: List[ChatMessage],
                                 temperature: float = 0.7, max_tokens: Optional[int] = None,
                                 features: Optional[Features] = None) -> ChatCompletionResponse:
-    """ä½¿ç”¨ Semantic Kernel å‰µå»ºèŠå¤©å®Œæˆ"""
+    """使用 Semantic Kernel 構建聊天完成"""
     try:
         kernel = await self.get_kernel_for_model(model_name, features)
         model_config = config_manager.get_model_by_name(model_name)
 
-        # å–å¾—èŠå¤©å®Œæˆæœå‹™
+        # 獲取聊天完成服務
 
         chat_completion = kernel.get_service(type=ChatCompletionClientBase)
 
-        # å‰µå»ºèŠå¤©æ­·å²
+        # 構建聊天歷史
 
         chat_history = ChatHistory()
 
-        # æ·»åŠ è¨Šæ¯åˆ°èŠå¤©æ­·å²
+        # 將消息添加到聊天歷史
 
         for message in messages:
             if message.role == "system":
@@ -367,25 +366,25 @@ async def create_chat_completion(self, model_name: str, messages: List[ChatMessa
                     ChatMessageContent(role=message.role, content=message.content)
                 )
 
-        # æº–å‚™è«‹æ±‚è¨­å®š
+        # 獲取執行設定
 
         execution_settings = kernel.get_prompt_execution_settings_from_service_id(
             service_id=chat_completion.service_id
         )
 
-        # å‹•æ…‹è¨­å®šåƒæ•¸ - ä¸å¯«æ­»ä»»ä½•æ¨¡åž‹è¨­å®š
+        # 設定執行參數 - 不會死任何模型設定
 
         provider = model_config.get('provider')
 
-        # Azure OpenAI çµ±ä¸€ä¸è¨­å®š temperature é¿å…åƒæ•¸è¡çª
+        # Azure OpenAI 會自動忽略 temperature 設定
 
         if provider != 'azure_openai':
             try:
                 execution_settings.temperature = temperature
             except Exception as e:
-                logger.warning(f"ç„¡æ³•è¨­å®š temperature: {e}")
+                logger.warning(f"設定 temperature: {e}")
 
-        # å‹•æ…‹è™•ç† max_tokens vs max_completion_tokens
+        # 設定 max_tokens vs max_completion_tokens
 
         max_tokens_value = max_tokens or model_config.get('max_completion_tokens') or model_config.get('max_tokens', 4096)
 
@@ -396,32 +395,32 @@ async def create_chat_completion(self, model_name: str, messages: List[ChatMessa
             try:
                 execution_settings.max_completion_tokens = max_tokens_value
                 token_set = True
-                logger.info(f"ä½¿ç”¨ max_completion_tokens: {max_tokens_value}")
+                logger.info(f"使用 max_completion_tokens: {max_tokens_value}")
             except Exception as e:
-                logger.warning(f"ç„¡æ³•è¨­å®š max_completion_tokens: {e}")
+                logger.warning(f"設定 max_completion_tokens: {e}")
 
-        # å•Ÿç”¨å‡½æ•¸èª¿ç”¨ï¼ˆå·¥å…·é¸æ“‡ï¼‰- æ¢ä»¶æ€§å•Ÿç”¨
+        # 設定使用函數選擇（工具偏好）- 預設為使用
 
         plugins_available = len(list(kernel.plugins)) > 0
         if plugins_available and hasattr(execution_settings, 'function_choice_behavior'):
 
-            # é‡æ–°å•Ÿç”¨å‡½æ•¸èª¿ç”¨ï¼Œä½†å…ˆè¨˜éŒ„è©³ç´°è³‡è¨Š
+            # 重置函數選擇行為，但先保留當前設定
 
             execution_settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
-            logger.info(f"ðŸ¤– [{model_name}] Agent mode enabled with {len(list(kernel.plugins))} plugins")
+            logger.info(f"🤖 [{model_name}] Agent mode enabled with {len(list(kernel.plugins))} plugins")
 
-            # è¨˜éŒ„å¯ç”¨çš„å‡½æ•¸
+            # 記錄可用的函數
 
             for plugin in kernel.plugins:
                 plugin_name = getattr(plugin, 'name', str(plugin))
-                logger.info(f"ðŸ”§ [{model_name}] Plugin '{plugin_name}' available for function calls")
+                logger.info(f"🔌 [{model_name}] Plugin '{plugin_name}' available for function calls")
         elif hasattr(execution_settings, 'function_choice_behavior'):
-            logger.info(f"ðŸ’¬ [{model_name}] Basic chat mode (no plugins available)")
+            logger.info(f"🤖 [{model_name}] Basic chat mode (no plugins available)")
         else:
-            logger.warning(f"âš ï¸  [{model_name}] FunctionChoiceBehavior not supported by this execution settings type")
+            logger.warning(f"⚠️  [{model_name}] FunctionChoiceBehavior not supported by this execution settings type")
 
-        # åŸ·è¡ŒèŠå¤©å®Œæˆ
-        # å¦‚æžœå•Ÿç”¨äº†å‡½æ•¸èª¿ç”¨ï¼Œéœ€è¦å‚³éž kernel å¯¦ä¾‹
+        # 執行聊天完成
+        # 如果使用了函數選擇，需要獲取 kernel 實例
 
         if plugins_available and hasattr(execution_settings, 'function_choice_behavior') and execution_settings.function_choice_behavior:
             response = await chat_completion.get_chat_message_contents(
@@ -437,11 +436,11 @@ async def create_chat_completion(self, model_name: str, messages: List[ChatMessa
         if not response:
             raise ValueError("No response from chat completion service")
 
-        # æª¢æŸ¥æ˜¯å¦æœ‰å‡½æ•¸èª¿ç”¨ç™¼ç”Ÿ
+        # 獲取回應元數據
 
         response_metadata = self._analyze_response_metadata(response, model_name)
 
-        # è½‰æ›ç‚º OpenAI å…¼å®¹æ ¼å¼
+        # 轉換為 OpenAI 兼容格式
 
         choice = ChatCompletionChoice(
             index=0,
@@ -449,7 +448,7 @@ async def create_chat_completion(self, model_name: str, messages: List[ChatMessa
             finish_reason="stop"
         )
 
-        # ä¼°ç®— token ä½¿ç”¨é‡ï¼ˆSemantic Kernel å¯èƒ½ä¸æä¾›è©³ç´°çµ±è¨ˆï¼‰
+        # 計算 token 使用情況（Semantic Kernel 可能不提供詳細計算）
 
         prompt_tokens = sum(len(msg.content.split()) for msg in messages)
         completion_tokens = len(str(response[0].content).split())
@@ -466,7 +465,7 @@ async def create_chat_completion(self, model_name: str, messages: List[ChatMessa
             usage=usage
         )
     except Exception as e:
-        logger.error(f"Semantic Kernel èŠå¤©å®Œæˆå¤±æ•—: {e}")
+        logger.error(f"Semantic Kernel 聊天完成失敗: {e}")
         raise
 
 # Event-driven: use in-process event bus to publish TokenUsage events
@@ -476,12 +475,12 @@ from lyrallm.logger_service.event_bus import event_bus as global_event_bus
 async def track_token_usage(request_id: str, model_name: str, usage: Optional[ChatCompletionUsage],
                           start_time: datetime, status: str, user_id: Optional[str] = None, messages: Optional[List[ChatMessage]] = None, response_text: Optional[str] = None):
     """
-    ç°¡åŒ–çš„ Token Usage è¿½è¹¤ - SK åªè² è²¬å‰µå»ºå’Œç™¼é€
-    æ‰€æœ‰æ€§èƒ½å„ªåŒ–éƒ½ç”± Logger Service è‡ªå·±è™•ç†
+    設定的 Token Usage 追蹤 - SK 僅限於內部和發送
+    所有性能指標都由 Logger Service 自動記錄
     """
     try:
 
-        # SK åªè² è²¬åŸºæœ¬çš„è³‡æ–™æº–å‚™
+        # SK 僅限於內部的基本數據源
 
         cost_usd = 0.0
         prompt_tokens = 0
@@ -495,7 +494,7 @@ async def track_token_usage(request_id: str, model_name: str, usage: Optional[Ch
             completion_tokens = usage.completion_tokens
             total_tokens = usage.total_tokens
 
-            # ç°¡å–®æˆæœ¬ä¼°ç®— (will be overridden by compute_token_usage if used)
+            # 計算成本估算 (will be overridden by compute_token_usage if used)
 
             model_config = config_manager.get_model_by_name(model_name)
             if model_config:
@@ -515,7 +514,7 @@ async def track_token_usage(request_id: str, model_name: str, usage: Optional[Ch
             total_tokens = calc.get('total_tokens', prompt_tokens + completion_tokens)
             cost_usd = calc.get('cost_usd', 0.0)
 
-        # å‰µå»ºè³‡æ–™ç‰©ä»¶
+        # 構建追蹤事件
 
         token_usage = TokenUsage(
             request_id=request_id,
@@ -530,7 +529,7 @@ async def track_token_usage(request_id: str, model_name: str, usage: Optional[Ch
             status=status
         )
 
-        # ç™¼å¸ƒäº‹ä»¶åˆ° EventBusï¼Œç”± logger_service çš„ consumer è™•ç†å¯«å…¥ DB/ELK
+        # 發布事件到 EventBus，由 logger_service 的 consumer 監聽寫入 DB/ELK
 
         try:
 
@@ -540,12 +539,12 @@ async def track_token_usage(request_id: str, model_name: str, usage: Optional[Ch
             logger.debug(f"[{request_id}] Token usage published to EventBus")
         except Exception as e:
 
-            # SK ä¸è™•ç† logging éŒ¯èª¤ï¼Œå°ˆæ³¨æ–¼ AI
+            # SK 僅限於 logging 監聽，務必注意 AI
 
             logger.error(f"[{request_id}] Token tracking error: {e}")
     except Exception as e:
 
-        # æ•æ‰è³‡æ–™æº–å‚™éšŽæ®µçš„éŒ¯èª¤ï¼Œä¸å½±éŸ¿ä¸»è¦æµç¨‹
+        # 繼續獲取元數據的監聽，並不影響主要流程
 
         logger.error(f"[{request_id}] Token tracking preparation error: {e}")
         return
@@ -567,22 +566,22 @@ def get_queue_status():
 
 async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx: RequestSecurityContext = None) -> ChatCompletionResponse:
     """
-    æµç¨‹ç·¨è™Ÿ #004: Agentæ¨¡å¼è™•ç†å…¥å£ - åˆå§‹åŒ–Agentå”èª¿å™¨
-    è™•ç† Agent æ¨¡å¼è«‹æ±‚ - ä½¿ç”¨å¤š Agent å”ä½œ
+    流程追蹤 #004: Agent模式請求 - 初始化Agent協同器
+    請求 Agent 模式時 - 使用多 Agent 協同
     """
     request_id = f"agent_{uuid.uuid4().hex[:12]}"
     start_time = datetime.now()
     try:
-        logger.info(f"[{request_id}] é€²å…¥ Agent æ¨¡å¼è™•ç†")
+        logger.info(f"[{request_id}] 進入 Agent 模式請求")
 
-        # ç²å–ç”¨æˆ¶æœ€æ–°è¨Šæ¯
+        # 獲取用戶最新消息
 
         user_messages = [msg.content for msg in request.messages if msg.role == 'user']
         if not user_messages:
             raise ValueError("No user message found")
         user_input = user_messages[-1]
 
-        # Resolve model name (handle 'auto' routing) and å‰µå»ºèŠå¤©æœå‹™
+        # Resolve model name (handle 'auto' routing) and 構建代理協同器
         model_name_to_use = request.model
         try:
             if request.model == 'auto':
@@ -601,15 +600,15 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
             raise ValueError(f"Model '{model_name_to_use}' not found")
         chat_service = await create_chat_service_for_model(model_name_to_use, model_config)
 
-        # æµç¨‹ç·¨è™Ÿ #005: å‰µå»ºAgentå”èª¿å™¨
-        # å‰µå»º Agent å”èª¿å™¨ (ä½¿ç”¨ä½¿ç”¨è€…é¸æ“‡çš„æ¨¡åž‹)
+        # 流程追蹤 #005: 構建Agent協同器
+        # 構建 Agent 協同器 (使用使用者選擇的模型)
 
         orchestrator = await create_practical_agent_orchestrator(chat_service)
         if not orchestrator:
-            raise ValueError("ç„¡æ³•åˆå§‹åŒ– Agent å”èª¿å™¨")
+            raise ValueError("無法初始化 Agent 協同器")
 
-        # æµç¨‹ç·¨è™Ÿ #006: å‹•æ…‹èƒ½åŠ›è¨»å†Š - æ ¹æ“šfeatureså•Ÿç”¨ç›¸æ‡‰åŠŸèƒ½
-        # æ ¹æ“š features å‹•æ…‹æ·»åŠ èƒ½åŠ›
+        # 流程追蹤 #006: 構建能力描述 - 根據features描述相應能力
+        # 根據 features 構建新增能力
 
         capabilities_added = []
         if request.features:
@@ -621,24 +620,24 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
                     capabilities_added.append("rag_search")
             if request.features.image_generation:
 
-                # TODO: æ·»åŠ åœ–åƒç”Ÿæˆèƒ½åŠ›
+                # TODO: 添加圖像生成能力
 
-                logger.info(f"[{request_id}] Image generation åŠŸèƒ½å°šæœªå¯¦ç¾")
+                logger.info(f"[{request_id}] Image generation 能力尚未實現")
                 pass
             if request.features.code_interpreter:
 
-                # TODO: æ·»åŠ ä»£ç¢¼è§£é‡‹å™¨èƒ½åŠ›
+                # TODO: 添加代碼解釋器能力
 
-                logger.info(f"[{request_id}] Code interpreter åŠŸèƒ½å°šæœªå¯¦ç¾")
+                logger.info(f"[{request_id}] Code interpreter 能力尚未實現")
                 pass
-        logger.info(f"[{request_id}] Agent æ¨¡å¼å•Ÿç”¨åŠŸèƒ½: {capabilities_added}")
+        logger.info(f"[{request_id}] Agent 模式可用功能: {capabilities_added}")
 
-        # æº–å‚™ features åƒæ•¸
+        # 獲取 features 字典
 
         features_dict = {}
         if request.features:
 
-            # ç›´æŽ¥æª¢æŸ¥å…·é«”çš„åŠŸèƒ½é–‹é—œ
+            # 直接查詢具體的功能開啟
 
             if request.features.web_search:
                 features_dict["web_search"] = True
@@ -648,10 +647,10 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
                 features_dict["image_generation"] = True
             if request.features.code_interpreter:
                 features_dict["code_interpreter"] = True
-            logger.info(f"[{request_id}] Agent æ¨¡å¼å•Ÿç”¨åŠŸèƒ½: {list(features_dict.keys())}")
+            logger.info(f"[{request_id}] Agent 模式可用功能: {list(features_dict.keys())}")
 
-        # æµç¨‹ç·¨è™Ÿ #007: è™•ç†ç”¨æˆ¶è«‹æ±‚ - èª¿ç”¨Agentå”èª¿å™¨
-        # è™•ç†è«‹æ±‚
+        # 流程追蹤 #007: 構建用戶請求 - 使用Agent協同器
+        # 構建請求
 
         try:
             # Protect agent processing from hanging by imposing a timeout.
@@ -659,13 +658,13 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
             # we timeout and allow the caller to fall back to standard model execution.
             result = await asyncio.wait_for(
                 orchestrator.process_request(user_input, features_dict, security_ctx=security_ctx),
-                timeout=60.0,
+                timeout=120.0,
             )
         except asyncio.TimeoutError:
             raise RuntimeError("Agent processing timed out (possible external tool/unavailable web search). Falling back to standard execution.")
 
-        # æµç¨‹ç·¨è™Ÿ #050: æ ¼å¼è½‰æ› - å°‡Agentçµæžœè½‰ç‚ºOpenAIæ ¼å¼
-        # è½‰æ›ç‚º OpenAI å…¼å®¹æ ¼å¼
+        # 流程追蹤 #050: 格式轉換 - 將Agent結果轉換成OpenAI格式
+        # 轉換成 OpenAI 兼容格式
 
         choice = ChatCompletionChoice(
             index=0,
@@ -673,7 +672,7 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
             finish_reason="stop"
         )
 
-        # ä¼°ç®— token ä½¿ç”¨é‡
+        # 計算 token 使用量
 
         prompt_tokens = sum(len(msg.content.split()) for msg in request.messages)
         completion_tokens = len(result.split())
@@ -690,23 +689,23 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
             usage=usage
         )
 
-        # è¨˜éŒ„å°è©±æ­·å²ï¼ˆç”¨æ–¼é™¤éŒ¯ï¼‰
+        # 記錄對話歷史（使用者選擇的模型）
 
         conversation_history = orchestrator.get_conversation_history()
         if conversation_history:
-            logger.info(f"[{request_id}] Agent å°è©±æ­·å²: {len(conversation_history)} è¼ªäº¤äº’")
-        logger.info(f"[{request_id}] Agent æ¨¡å¼è™•ç†å®Œæˆ")
+            logger.info(f"[{request_id}] Agent 選擇的模型: {len(conversation_history)} 會話")
+        logger.info(f"[{request_id}] Agent 模式執行完成")
         return response
     except Exception as e:
-        logger.error(f"[{request_id}] Agent æ¨¡å¼è™•ç†å¤±æ•—: {e}")
+        logger.error(f"[{request_id}] Agent 模式執行失敗: {e}")
         import traceback
 
-        logger.error(f"[{request_id}] éŒ¯èª¤å †ç–Š: {traceback.format_exc()}")
+        logger.error(f"[{request_id}] 錯誤追蹤: {traceback.format_exc()}")
         raise
 
 async def create_chat_service_for_model(model_name: str, model_config: Dict[str, Any]) -> ChatCompletionClientBase:
     """
-    ç‚ºæŒ‡å®šæ¨¡åž‹å‰µå»ºèŠå¤©æœå‹™
+    創建指定模型的聊天服務
     """
     provider = model_config.get('provider')
     if provider == 'azure_openai':
@@ -735,8 +734,8 @@ async def create_chat_service_for_model(model_name: str, model_config: Dict[str,
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
-# æµç¨‹ç·¨è™Ÿ #001: APIè«‹æ±‚å…¥å£é»ž - æŽ¥æ”¶èŠå¤©å®Œæˆè«‹æ±‚
-# æ­¤è™•æ˜¯æ•´å€‹èŠå¤©æµç¨‹çš„èµ·é»žï¼Œæ‰€æœ‰çš„å°è©±è«‹æ±‚éƒ½æœƒç¶“éŽé€™è£¡
+# 流程追蹤 #001: API請求入口 - 接收用戶請求並完成處理
+# 此處是整體請求的起點，所有的後續請求都會經過這個入口
 @router.post("/api/chat/completions")
 async def create_chat_completion(
     request: ChatCompletionRequest,
@@ -744,19 +743,19 @@ async def create_chat_completion(
     security_ctx: RequestSecurityContext = Depends(get_request_security_context),
 ):
     """
-    å‰µå»ºèŠå¤©å®Œæˆ - æ”¯æ´å‚³çµ±æ¨¡å¼å’Œ Agent æ¨¡å¼
+    創建聊天完成 - 支持協同器模式和 Agent 模式
     """
 
-    # ç”Ÿæˆå”¯ä¸€è«‹æ±‚ ID
+    # 生成唯一請求 ID
 
     request_id = f"req_{uuid.uuid4().hex[:12]}"
     start_time = datetime.now()
 
-    # è¨˜éŒ„åŽŸå§‹è«‹æ±‚
+    # 記錄原始請求
 
     await request_logger.log_request_body(raw_request)
     try:
-        logger.info(f"[{request_id}] æ”¶åˆ°èŠå¤©è«‹æ±‚ - æ¨¡åž‹: {request.model}")
+        logger.info(f"[{request_id}] 收到用戶請求 - 模型: {request.model}")
         request_dict = request.model_dump()
 
         # Enforce role-based model access
@@ -777,12 +776,12 @@ async def create_chat_completion(
                 },
             )
 
-        # ç‰¹åˆ¥æª¢æŸ¥ features å­—æ®µ
+        # 特殊性查詢 features 欄位
 
-        logger.info(f"[{request_id}] Features åŽŸå§‹å€¼: {request.features}")
-        logger.info(f"[{request_id}] Features é¡žåž‹: {type(request.features)}")
+        logger.info(f"[{request_id}] Features 原始值: {request.features}")
+        logger.info(f"[{request_id}] Features 類型: {type(request.features)}")
         if request.features:
-            logger.info(f"[{request_id}] Features å…§å®¹: web_search={request.features.web_search}, image_generation={request.features.image_generation}, rag_search={request.features.rag_search}, code_interpreter={request.features.code_interpreter}")
+            logger.info(f"[{request_id}] Features 內容: web_search={request.features.web_search}, image_generation={request.features.image_generation}, rag_search={request.features.rag_search}, code_interpreter={request.features.code_interpreter}")
             feature_payload = request.features.model_dump(exclude_none=True)
             requested_features = [key for key, value in feature_payload.items() if isinstance(value, bool) and value]
             disallowed_features = [feature for feature in requested_features if not security_ctx.allows_feature(feature)]
@@ -801,22 +800,22 @@ async def create_chat_completion(
                         "role": security_ctx.role.name,
                     },
                 )
-            logger.info(f"[{request_id}] Features å…§å®¹: web_search={request.features.web_search}, image_generation={request.features.image_generation}, rag_search={request.features.rag_search}, code_interpreter={request.features.code_interpreter}")
+            logger.info(f"[{request_id}] Features 內容: web_search={request.features.web_search}, image_generation={request.features.image_generation}, rag_search={request.features.rag_search}, code_interpreter={request.features.code_interpreter}")
 
-        # æµç¨‹ç·¨è™Ÿ #002: æ¨¡å¼æ±ºç­–é»ž - åˆ¤æ–·ä½¿ç”¨Agentæ¨¡å¼æˆ–ç›´æŽ¥æ¨¡å¼
-        # æ ¹æ“šå‰ç«¯å‚³ä¾†çš„featuresåƒæ•¸æ±ºå®šè™•ç†æ–¹å¼
+        # 流程追蹤 #002: 模型選擇 - 判斷使用Agent模式或直接模式
+        # 基於前端傳遞的features欄位
 
         agent_mode_enabled = False
         if request.features:
 
-            # æª¢æŸ¥æ˜¯å¦æœ‰ä»»ä½•åŠŸèƒ½å•Ÿç”¨
+            # 檢查是否有任何功能被啟用
 
             agent_mode_enabled = (request.features.web_search or
                                 request.features.image_generation or
                                 request.features.rag_search or
                                 request.features.code_interpreter)
             if agent_mode_enabled:
-                logger.info(f"[{request_id}] åµæ¸¬åˆ° features åƒæ•¸ï¼Œé€²å…¥ Agent æ¨¡å¼")
+                logger.info(f"[{request_id}] 檢測到 features 欄位，轉入 Agent 模式")
                 enabled_features = []
                 if request.features.web_search:
                     enabled_features.append("web_search")
@@ -826,22 +825,22 @@ async def create_chat_completion(
                     enabled_features.append("rag_search")
                 if request.features.code_interpreter:
                     enabled_features.append("code_interpreter")
-                logger.info(f"[{request_id}] å•Ÿç”¨åŠŸèƒ½: {enabled_features}")
+                logger.info(f"[{request_id}] 啟用功能: {enabled_features}")
         else:
-            logger.info(f"[{request_id}] å‰ç«¯æœªæŒ‡å®šåŠŸèƒ½ï¼Œä½¿ç”¨åŸºæœ¬èŠå¤©æ¨¡å¼")
+            logger.info(f"[{request_id}] 前端並未指定功能，使用基本協同模式")
 
-        # æµç¨‹ç·¨è™Ÿ #003A: Agentæ¨¡å¼åˆ†æ”¯ - é€²å…¥å¤šAgentå”ä½œæµç¨‹
-        # ç•¶å•Ÿç”¨ä»»ä½•ç‰¹æ®ŠåŠŸèƒ½æ™‚èµ°æ­¤åˆ†æ”¯
+        # 流程追蹤 #003A: Agent模式分支 - 轉入多Agent協作流程
+        # 針對使用任何特殊功能時走此分支
 
         if agent_mode_enabled:
             try:
-                # å¦‚æžœå‰ç«¯è¦æ±‚ä¸²æµï¼Œç‚º Agent æ¨¡å¼æä¾› SSE ä¸²æµæ”¯æ´
+                # 如前端要求串流，則 Agent 模式提供 SSE 串流支援
                 if request.stream:
                     async def agent_stream_generator():
                         done_sent = False
                         final_text = ""
                         try:
-                            # é å…ˆå˜—è©¦å–å¾— Router çš„å¯¦éš›åˆ†é…ï¼ˆå°æ–¼ 'auto' æ¨¡å¼ï¼‰
+                            # 首先嘗試獲取 Router 的隱式分配（默認 'auto' 模式）
                             routed_model = None
                             routing_info = None
                             try:
@@ -850,7 +849,7 @@ async def create_chat_completion(
                                     _executor = ModelExecutor()
                                     routed_model, routing_info = await _executor._route_model(request.messages, request_id)
                                     logger.info(f"[{request_id}] Agent stream - routed to: {routed_model}")
-                                    # ç«‹åˆ»å‘ŠçŸ¥å‰ç«¯è·¯ç”±è³‡è¨Š
+                                    # 設定前端路由資訊
                                     info_payload = {
                                         "type": "info",
                                         "model": routed_model or request.model,
@@ -861,12 +860,12 @@ async def create_chat_completion(
                             except Exception as route_err:
                                 logger.warning(f"[{request_id}] Router early resolution failed: {route_err}")
 
-                            # å‘¼å«ç¾æœ‰çš„ Agent è™•ç†å‡½å¼ï¼ˆæœƒå›žå‚³å®Œæ•´çµæžœï¼‰
+                            # 發送所有的 Agent 回應（彙總完整結果）
                             response = await handle_agent_mode_request(request, security_ctx)
                             if response and isinstance(response.choices, list) and response.choices:
                                 final_text = response.choices[0].message.content or ""
 
-                            # å°‡å›žè¦†åˆ†æ®µé€å‡ºï¼Œä»¥æ¨¡æ“¬ streaming behavior
+                            # 逐步回傳分段結果，以模擬 streaming behavior
                             chunk_size = 256
                             for i in range(0, len(final_text), chunk_size):
                                 piece = final_text[i:i+chunk_size]
@@ -878,7 +877,7 @@ async def create_chat_completion(
                                 yield _format_sse(payload)
                                 await asyncio.sleep(0)
 
-                            # å‚³é€ final payload
+                            # 發送 final payload
                             final_payload = {
                                 "type": "final",
                                 "model": response.model if response else request.model,
@@ -889,7 +888,7 @@ async def create_chat_completion(
                             yield b"data: [DONE]\n\n"
                             done_sent = True
 
-                            # è¿½è¹¤ token ä½¿ç”¨
+                            # 追蹤 token 使用
                             try:
                                 await track_token_usage(
                                     request_id=request_id,
@@ -914,10 +913,10 @@ async def create_chat_completion(
                     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
                     return StreamingResponse(agent_stream_generator(), media_type="text/event-stream", headers=headers)
 
-                # éžä¸²æµæƒ…æ³ä»ç¶­æŒåŽŸè¡Œç‚º
+                # 非串流情境仍然原行處理
                 response = await handle_agent_mode_request(request, security_ctx)
 
-                # è¿½è¹¤ token ä½¿ç”¨
+                # 追蹤 token 使用
                 await track_token_usage(
                     request_id=request_id,
                     model_name=request.model,
@@ -930,12 +929,12 @@ async def create_chat_completion(
                 )
                 return response
             except Exception as e:
-                logger.error(f"[{request_id}] Agent æ¨¡å¼å¤±æ•—ï¼Œå˜—è©¦é™ç´šåˆ°å‚³çµ±æ¨¡å¼: {e}")
+                logger.error(f"[{request_id}] Agent 模式失效，將回退到標準模式: {e}")
 
-                # é™ç´šåˆ°å‚³çµ±æ¨¡å¼
+                # 回退到標準模式
                 agent_mode_enabled = False
 
-        # æµç¨‹ç·¨è™Ÿ #003B: ç›´æŽ¥æ¨¡å¼åˆ†æ”¯ - ä½¿ç”¨åŸºæœ¬èŠå¤©åŠŸèƒ½ï¼ˆä¸å•Ÿç”¨ç‰¹æ®ŠåŠŸèƒ½æ™‚ï¼‰
+        # 流程追蹤 #003B: 直接模式分支 - 使用基本協同功能（不啟用特殊功能時）
         # Standard model processing (optimized with new ModelExecutor)
 
         if not agent_mode_enabled:
@@ -1140,7 +1139,7 @@ async def create_chat_completion(
             return response
     except HTTPException:
 
-        # è¿½è¹¤å¤±æ•—çš„è«‹æ±‚
+        # 追蹤失敗的請求
 
         await track_token_usage(
             request_id=request_id,
@@ -1154,7 +1153,7 @@ async def create_chat_completion(
         raise
     except Exception as e:
 
-        # è¿½è¹¤ç³»çµ±éŒ¯èª¤
+        # 追蹤系統錯誤
 
         await track_token_usage(
             request_id=request_id,
@@ -1165,17 +1164,17 @@ async def create_chat_completion(
             user_id=security_ctx.user_id,
             messages=request.messages
         )
-        logger.error(f"[{request_id}] èŠå¤©å®Œæˆå¤±æ•—: {e}")
+        logger.error(f"[{request_id}] 聊天完成失敗: {e}")
         import traceback
 
-        logger.error(f"[{request_id}] éŒ¯èª¤å †ç–Š: {traceback.format_exc()}")
+        logger.error(f"[{request_id}] 錯誤追蹤: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Chat completion failed: {str(e)}")
 
 @router.get("/api/chat/models")
 async def get_chat_models(
     security_ctx: RequestSecurityContext = Depends(get_request_security_context),
 ):
-    """å–å¾—æ”¯æ´èŠå¤©çš„æ¨¡åž‹åˆ—è¡¨"""
+    """獲取支援聊天的模型列表"""
     try:
         available_models = config_manager.get_available_models()
         visible_models = [
@@ -1199,7 +1198,7 @@ async def get_chat_models(
             "data": chat_models
         }
     except Exception as e:
-        logger.error(f"å–å¾—èŠå¤©æ¨¡åž‹å¤±æ•—: {e}")
+        logger.error(f"獲取支援聊天的模型列表失敗: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get chat models: {str(e)}")
 
 @router.post("/api/chat/feedback")
@@ -1223,7 +1222,7 @@ async def submit_chat_feedback(
 
 @router.get("/api/chat/health")
 async def chat_health_check():
-    """èŠå¤©æœå‹™å¥åº·æª¢æŸ¥ + Token Tracking ç‹€æ…‹"""
+    """獲取聊天服務的健康檢查 + Token Tracking 狀態"""
     try:
         event_status = get_queue_status()
 
@@ -1236,7 +1235,7 @@ async def chat_health_check():
         except Exception:
             pg_health = {"connected": False}
 
-        # ç²å–å·²åŠ è¼‰çš„æ¨¡åž‹æ•¸é‡
+        # 獲取已加載的模型數量
 
         available_models = config_manager.get_available_models()
         visible_models = [
@@ -1286,12 +1285,12 @@ async def chat_health_check():
             "ollama_models": ollama_models
         }
     except Exception as e:
-        logger.error(f"å¥åº·æª¢æŸ¥å¤±æ•—: {e}")
+        logger.error(f"健康檢查失敗: {e}")
         raise HTTPException(status_code=503, detail=f"Health check failed: {str(e)}")
 
 @router.get("/api/chat/plugins")
 async def get_plugin_info():
-    """å–å¾— Plugin é…ç½®è³‡è¨Š"""
+    """獲取 Plugin 配置資訊"""
     try:
         plugin_info = plugin_manager.get_plugin_info()
         return {
@@ -1300,12 +1299,12 @@ async def get_plugin_info():
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error(f"å–å¾— Plugin è³‡è¨Šå¤±æ•—: {e}")
+        logger.error(f"獲取 Plugin 配置資訊失敗: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get plugin info: {str(e)}")
 
 @router.post("/api/chat/plugins/reload")
 async def reload_plugin_config():
-    """é‡æ–°è¼‰å…¥ Plugin é…ç½®ï¼ˆç†±æ›´æ–°ï¼‰"""
+    """重新載入 Plugin 配置（即時更新）"""
     try:
         plugin_manager.reload_config()
         plugin_info = plugin_manager.get_plugin_info()
@@ -1316,14 +1315,14 @@ async def reload_plugin_config():
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error(f"é‡æ–°è¼‰å…¥ Plugin é…ç½®å¤±æ•—: {e}")
+        logger.error(f"重新載入 Plugin 配置失敗: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reload plugin config: {str(e)}")
 
 # @router.get("/api/chat/agent/status")
 # async def get_agent_status():
-#     """ç²å– Agent æ¨¡å¼ç‹€æ…‹"""
+#     """獲取 Agent 模式狀態"""
 #     try:
-#         # å‰µå»ºä¸€å€‹æ¸¬è©¦ç”¨çš„èŠå¤©æœå‹™ä¾†æª¢æŸ¥ Agent å¯ç”¨æ€§
+#         # 構建一個簡單的聊天服務來檢查 Agent 可用性
 #         test_model = config_manager.get_default_model()
 #         if not test_model:
 #             available_models = config_manager.get_available_models()
@@ -1354,7 +1353,7 @@ async def reload_plugin_config():
 #             "timestamp": datetime.now().isoformat()
 #         }
 #     except Exception as e:
-#         logger.error(f"ç²å– Agent ç‹€æ…‹å¤±æ•—: {e}")
+#         logger.error(f"獲取 Agent 模式失效: {e}")
 #         return {
 #             "status": "error",
 #             "agent_mode": "disabled",
@@ -1363,25 +1362,25 @@ async def reload_plugin_config():
 #         }
 @router.get("/api/chat/features")
 async def get_available_features():
-    """å–å¾—æ‰€æœ‰å¯ç”¨çš„åŠŸèƒ½åˆ—è¡¨"""
+    """獲取所有可用功能列表"""
     try:
 
-        # ç°¡åŒ–çš„åŠŸèƒ½åˆ—è¡¨
+        # 簡化的功能列表
 
         available_features = ["web_search", "image_generation"]
 
-        # å–å¾—æ¯å€‹åŠŸèƒ½çš„è©³ç´°è³‡è¨Š
+        # 獲取每個功能的詳細資訊
 
         feature_details = [
             {
                 "name": "web_search",
-                "description": "Web Search Plugin - æä¾›ç¶²è·¯æœå°‹åŠŸèƒ½",
+                "description": "Web Search Plugin - 提供網路搜尋功能",
                 "require_config": True,
                 "plugin_id": "web_search"
             },
             {
                 "name": "image_generation",
-                "description": "Image Generation Plugin - æä¾›åœ–åƒç”ŸæˆåŠŸèƒ½",
+                "description": "Image Generation Plugin - 提供圖像生成能力",
                 "require_config": True,
                 "plugin_id": "image_generation"
             }
@@ -1396,6 +1395,6 @@ async def get_available_features():
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error(f"å–å¾—å¯ç”¨åŠŸèƒ½å¤±æ•—: {e}")
+        logger.error(f"獲取可用功能失敗: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get available features: {str(e)}")
 

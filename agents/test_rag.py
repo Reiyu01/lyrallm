@@ -1,4 +1,4 @@
-﻿"""
+"""
 RAG Agent - 負責 Elasticsearch RAG 搜尋
 專注於執行向量搜尋、檢索相關文檔並返回結構化資料
 """
