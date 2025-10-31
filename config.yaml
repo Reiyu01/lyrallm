@@ -89,7 +89,7 @@ models:
       description: "Azure OpenAI o3-mini via Semantic Kernel"
       #max_tokens: 4096
       max_completion_tokens: 4096
-      intents: ["open_qa", "closed_qa","summarization"]
+      intents: ["open_qa", "closed_qa","summarization","text_generation"]
       # approximate capability baseline lower than gpt-4o
       iq_score: 48
 
@@ -104,7 +104,7 @@ models:
       description: "Azure OpenAI o1"
       #max_tokens: 4096
       max_completion_tokens: 4096
-      intents: ["summarization","text_generation"]
+      intents: ["summarization","text_generation",]
       iq_score: 47
 
 

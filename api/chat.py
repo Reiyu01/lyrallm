@@ -754,6 +754,12 @@ async def create_chat_completion(
     # 記錄原始請求
 
     await request_logger.log_request_body(raw_request)
+    #10/31
+    # 預設插入繁體中文 system message（如未指定）
+    if not any(msg.role == "system" for msg in request.messages):
+        request.messages.insert(0, ChatMessage(role="system", content="你是一位LyraLLM系統的助手，請用繁體中文回答所有問題。"))
+    #30/31
+    
     try:
         logger.info(f"[{request_id}] 收到用戶請求 - 模型: {request.model}")
         request_dict = request.model_dump()

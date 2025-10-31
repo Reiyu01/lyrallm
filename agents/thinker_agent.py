@@ -675,25 +675,25 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             
             chat_history = ChatHistory()
             chat_history.add_user_message(f"""
-基於當前搜尋結果，評估是否需要更多資訊。
+                基於當前搜尋結果，評估是否需要更多資訊。
 
-原始問題: {user_query}
-最新搜尋結果: {latest_result}
-已有全部資訊: {all_info}
+                原始問題: {user_query}
+                最新搜尋結果: {latest_result}
+                已有全部資訊: {all_info}
 
-請評估：
-1. **資訊完整性**: 當前資訊是否足夠回答用戶問題？
-2. **資訊品質**: 資訊是否準確、時效性如何？
-3. **缺失資訊**: 還需要哪些具體資訊？
-4. **下一步**: 需要進一步搜尋還是可以回答？
+                請評估：
+                1. **資訊完整性**: 當前資訊是否足夠回答用戶問題？
+                2. **資訊品質**: 資訊是否準確、時效性如何？
+                3. **缺失資訊**: 還需要哪些具體資訊？
+                4. **下一步**: 需要進一步搜尋還是可以回答？
 
-請按此格式回應：
-COMPLETENESS: [完整性評分 1-10]
-QUALITY: [品質評分 1-10]
-MISSING_INFO: [缺失的資訊]
-NEXT_ACTION: [SEARCH_MORE|PROVIDE_ANSWER]
-NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
-""")
+                請按此格式回應：
+                COMPLETENESS: [完整性評分 1-10]
+                QUALITY: [品質評分 1-10]
+                MISSING_INFO: [缺失的資訊]
+                NEXT_ACTION: [SEARCH_MORE|PROVIDE_ANSWER]
+                NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
+                """)
             
             response = await safe_chat_completion(
                 self.chat_service,
@@ -950,7 +950,7 @@ NEXT_QUERY: [如果需要更多搜尋，下一個查詢]
 - 如果問題涉及即時資訊（如今天的新聞、股價等），請說明你的知識有時間限制
 - 給出具體、可行的建議
 - 保持回答簡潔而完整
-
+- 請使用繁體中文
 請直接回答，不需要說明你的思考過程。
 """)
             
