@@ -17,6 +17,7 @@ tenacity
 pydantic
 asyncpg
 elasticsearch
+aiomysql
 semantic-kernel[mcp]
 mcp-client
 neo4j

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import List, Dict, Any
 from lyrallm.config.config_manager import config_manager
@@ -15,18 +14,16 @@ class BaseHandler:
 
 
 class DbHandler(BaseHandler):
-    """Handler that persists token usage via the configured analytics adapter."""
+    """Handler that writes token usage to configured analytics storage."""
     background = False
 
-    def __init__(self):
-        # use adapter factory for pluggable backends (Postgres / Elasticsearch / etc.)
-        from lyrallm.adapters.factory import get_adapter
-        self._adapter = get_adapter('analytics')
-        logger.info(f"DbHandler initialized with adapter: {self._adapter.__class__.__name__}")
+    def __init__(self, adapter: Any):
+        self._adapter = adapter
 
     async def handle(self, event: Dict[str, Any]):
         try:
-            await self._adapter.connect()
+            if hasattr(self._adapter, 'connect'):
+                await self._adapter.connect()
             await self._adapter.write_token_usage(event)
             logger.info(f"DbHandler wrote request_id={event.get('request_id')} to analytics store")
             return True
@@ -82,16 +79,15 @@ def get_handlers() -> List[BaseHandler]:
     cfg = config_manager.config
     handlers: List[BaseHandler] = []
 
-    # Database/analytics handler (uses adapter factory, picks Postgres or Elasticsearch)
-    db_cfg = cfg.get('database', {}) or {}
-    storages_cfg = cfg.get('storages', {}) or {}
-    analytics_cfg = storages_cfg.get('analytics', {}) or {}
-    analytics_type = (analytics_cfg.get('type') or analytics_cfg.get('adapter') or analytics_cfg.get('backend') or '').lower()
-    logger.info(f"Logger handlers init - database_cfg_present={bool(db_cfg)} analytics_cfg={analytics_cfg} analytics_type={analytics_type}")
+    # Database handlers (may be multiple adapters)
+    try:
+        from lyrallm.adapters.factory import get_adapters
 
-    if db_cfg or analytics_cfg or analytics_type:
-        # Adapter factory will route to Postgres or Elasticsearch depending on config
-        handlers.append(DbHandler())
+        analytics_adapters = get_adapters('analytics')
+        for adapter in analytics_adapters:
+            handlers.append(DbHandler(adapter))
+    except Exception as exc:
+        logger.exception(f"Failed to initialise analytics handlers: {exc}")
 
     # ELK / forwarder handlers
     elk = cfg.get('elk', {})

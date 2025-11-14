@@ -283,12 +283,17 @@ event_bus:
 # 資料庫配置
 storages:
   analytics:
-    type: elasticsearch
-    es:
-      endpoint: "https://127.0.0.1:9200"
-      index: "analytics_index"
-      username: "elastic"
-      password: "SI=4q-z5T5qLhbwO_lQk"
+    - type: mysql
+      dsn: "mysql+aiomysql://lyra:lyrapassword@127.0.0.1:3307/lyra_tokens"
+    - type: elasticsearch
+      es:
+        endpoint: "http://127.0.0.1:9200"
+        index: "analytics_index"
+        endpoint: "https://127.0.0.1:9200"
+        index: "analytics_index"
+        username: "elastic"
+        password: "SI=4q-z5T5qLhbwO_lQk"
+
 # storages:
 #   analytics:
 #     # 擇一選項：將 analytics 儲存在 Postgres 或 Elasticsearch。
