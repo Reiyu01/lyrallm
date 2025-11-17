@@ -1227,7 +1227,9 @@ async def submit_chat_feedback(
         raise HTTPException(status_code=500, detail="Failed to record feedback")
 
 @router.get("/api/chat/health")
-async def chat_health_check():
+async def chat_health_check(
+    security_ctx: RequestSecurityContext = Depends(get_request_security_context),
+):
     """獲取聊天服務的健康檢查 + Token Tracking 狀態"""
     try:
         event_status = get_queue_status()

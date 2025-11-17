@@ -316,11 +316,11 @@ storages:
 # Vector DB configuration (high-level routing / vector store options)
 vectordb:
   provider: "elasticsearch"   # supported: elasticsearch (future: qdrant, milvus, weaviate)
-  endpoint: "https://127.0.0.1:9200"  # Elasticsearch endpoint (was incorrectly set to Neo4j browser URL)
+  endpoint: "http://127.0.0.1:9200"  # Elasticsearch endpoint (was incorrectly set to Neo4j browser URL)
   # Using username/password authentication below. If you prefer API key auth,
   # set `api_key` instead and remove username/password.
   username: "elastic"
-  password: "SI=4q-z5T5qLhbwO_lQk"
+  password: "s271QuXZ"
   #api_key: ${ES_LOCAL_API_KEY}
 # vectordb:
 #   provider: "elasticsearch"   # supported: elasticsearch (future: qdrant, milvus, weaviate)
