@@ -1,8 +1,11 @@
 import logging
-from typing import List, Dict, Any
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 from lyrallm.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
+
+_HANDLERS_CACHE: Optional[List["BaseHandler"]] = None
 
 
 class BaseHandler:
@@ -30,6 +33,30 @@ class DbHandler(BaseHandler):
         except Exception as e:
             logger.exception(f"DbHandler failed to insert event: {e}")
             return False
+
+    async def flush(self, now: Optional[datetime] = None, batch_size: int = 100) -> int:
+        flush_fn = getattr(self._adapter, 'flush_due_windows', None)
+        if flush_fn is None:
+            return 0
+
+        try:
+            if hasattr(self._adapter, 'connect'):
+                await self._adapter.connect()
+
+            kwargs = {'batch_size': batch_size}
+            if now is not None:
+                kwargs['now'] = now
+
+            try:
+                return await flush_fn(**kwargs)
+            except TypeError:
+                kwargs.pop('batch_size', None)
+                if kwargs:
+                    return await flush_fn(**kwargs)
+                return await flush_fn()
+        except Exception as exc:
+            logger.exception(f"DbHandler flush failed: {exc}")
+            return 0
 
 
 class HttpForwardHandler(BaseHandler):
@@ -76,6 +103,10 @@ def get_handlers() -> List[BaseHandler]:
 
     Returns handlers in order where DB handlers come first (so writes happen before forwarding).
     """
+    global _HANDLERS_CACHE
+    if _HANDLERS_CACHE is not None:
+        return _HANDLERS_CACHE
+
     cfg = config_manager.config
     handlers: List[BaseHandler] = []
 
@@ -114,4 +145,9 @@ def get_handlers() -> List[BaseHandler]:
             url = elk_url or 'http://elk.54ucl.com:50000'
             handlers.append(HttpForwardHandler(url))
 
+    _HANDLERS_CACHE = handlers
     return handlers
+
+
+def get_db_handlers() -> List[DbHandler]:
+    return [h for h in get_handlers() if isinstance(h, DbHandler)]

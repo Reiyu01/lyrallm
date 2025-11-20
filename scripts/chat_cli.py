@@ -31,6 +31,16 @@ from typing import List, Dict
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8081
+TEST_USER_ID = "cli-test-user"
+TEST_USER_ROLE = "standard_user"
+
+
+def _make_headers() -> Dict[str, str]:
+    """Return headers embedding a recognizable CLI test identity."""
+    return {
+        "X-Lyra-User": TEST_USER_ID,
+        "X-Lyra-Role": TEST_USER_ROLE,
+    }
 
 
 def try_inprocess_client():
@@ -78,13 +88,18 @@ def try_http_client():
 
 def send_message_inprocess(client, model: str, messages: List[Dict]):
     payload = {"model": model, "messages": messages}
-    r = client.post("/api/chat/completions", json=payload)
+    r = client.post("/api/chat/completions", json=payload, headers=_make_headers())
     return r
 
 
 def send_message_http(requests_mod, base: str, model: str, messages: List[Dict]):
     payload = {"model": model, "messages": messages}
-    r = requests_mod.post(f"{base}/api/chat/completions", json=payload, timeout=30)
+    r = requests_mod.post(
+        f"{base}/api/chat/completions",
+        json=payload,
+        timeout=30,
+        headers=_make_headers(),
+    )
     return r
 
 
