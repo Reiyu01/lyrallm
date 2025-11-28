@@ -77,7 +77,10 @@ class GatewayComparisonTest:
             start = time.time()
             try:
                 response = client.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[
+                        {"role": "system", "content": "你是一位LyraLLM系統的助手，請用繁體中文回答所有問題。"},
+                        {"role": "user", "content": prompt}
+                    ],
                     model=self.model
                 )
                 end = time.time()
@@ -119,18 +122,31 @@ class GatewayComparisonTest:
         url = self.lyrallm_config["base_url"]
         timeout = self.lyrallm_config["timeout"]
         
+        # 使用 Session 復用 HTTP 連接以獲得準確的性能測量
+        session = requests.Session()
+        
         results = []
         for i in range(num_tests):
             start = time.time()
             try:
                 # LyraLLM 使用 OpenAI 兼容格式
-                response = requests.post(
+                # 明確禁用所有 features 以避免觸發 Agent 模式，確保公平比較
+                response = session.post(
                     url,
                     json={
                         "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": [
+                            {"role": "system", "content": "你是一位LyraLLM系統的助手，請用繁體中文回答所有問題。"},
+                            {"role": "user", "content": prompt}
+                        ],
                         "stream": False,
-                        "temperature": 0.7
+                        "temperature": 0.7,
+                        "features": {
+                            "web_search": False,
+                            "rag_search": False,
+                            "image_generation": False,
+                            "code_interpreter": False
+                        }
                     },
                     headers={"Content-Type": "application/json"},
                     timeout=timeout
@@ -183,6 +199,7 @@ class GatewayComparisonTest:
             
             time.sleep(0.5)
         
+        session.close()
         self.lyrallm_results = results
         return results
     
@@ -197,15 +214,21 @@ class GatewayComparisonTest:
         url = self.ollama_config["base_url"]
         timeout = self.ollama_config["timeout"]
         
+        # 使用 Session 復用 HTTP 連接
+        session = requests.Session()
+        
         results = []
         for i in range(num_tests):
             start = time.time()
             try:
-                response = requests.post(
+                response = session.post(
                     url,
                     json={
                         "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": [
+                            {"role": "system", "content": "你是一位LyraLLM系統的助手，請用繁體中文回答所有問題。"},
+                            {"role": "user", "content": prompt}
+                        ],
                         "stream": False
                     },
                     timeout=timeout
@@ -245,6 +268,7 @@ class GatewayComparisonTest:
             
             time.sleep(0.5)
         
+        session.close()
         self.direct_results = results
         return results
     

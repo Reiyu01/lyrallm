@@ -283,6 +283,7 @@ event_bus:
 # 資料庫配置
 storages:
   analytics:
+    enabled: true  # 臨時禁用以測試性能
     type: elasticsearch
     es:
       endpoint: "https://127.0.0.1:9200"

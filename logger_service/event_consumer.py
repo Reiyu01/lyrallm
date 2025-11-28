@@ -5,6 +5,17 @@ from .handlers import get_handlers
 
 logger = logging.getLogger(__name__)
 
+# 全局緩存 handlers，避免每次事件都重新創建
+_handlers_cache = None
+
+def _get_cached_handlers():
+    """獲取緩存的 handlers，首次調用時創建"""
+    global _handlers_cache
+    if _handlers_cache is None:
+        _handlers_cache = get_handlers()
+        logger.info(f"[EventConsumer] Initialized {len(_handlers_cache)} handlers")
+    return _handlers_cache
+
 
 async def _handle_event(event: dict):
     """Core event handler that dispatches to configured handlers.
@@ -22,7 +33,7 @@ async def _handle_event(event: dict):
                 pass
 
         logger.info(f"[EventConsumer] Received event: {event.get('request_id') or event.get('id')}")
-        handlers = get_handlers()
+        handlers = _get_cached_handlers()
 
         for h in handlers:
             try:

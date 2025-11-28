@@ -54,25 +54,34 @@ class ModelExecutor:
         request_id = f"req_{int(time.time() * 1000)}"
         
         try:
-            # Handle auto routing
-            if model_name == 'auto':
+            # Fast path: 明確指定模型時跳過路由檢查
+            if model_name != 'auto':
+                # Provide basic routing info for explicit models
+                routing_info = {
+                    "model": model_name,
+                    "routing_method": "explicit",
+                }
+                logger.debug(f"[{request_id}] Using explicitly specified model: {model_name}")
+            else:
+                # Auto routing path
                 model_name, routing_info = await self._route_model(messages, request_id)
-                logger.info(f"[{request_id}] Auto-routed to: {model_name}")
+                logger.debug(f"[{request_id}] Auto-routed to: {model_name}")
                 # Validate routed model exists and is enabled
                 if not self._is_model_available(model_name):
                     logger.warning(f"[{request_id}] Routed model {model_name} unavailable, using fallback")
                     model_name = self._get_fallback_model()
-            else:
-                routing_info = None
-
-            if security_ctx and routing_info:
-                model_name, routing_info = self._enforce_security_policies(
-                    model_name, routing_info, security_ctx, request_id
-                )
+                
+                # Apply security policies only for auto-routed models
+                if security_ctx and routing_info:
+                    model_name, routing_info = self._enforce_security_policies(
+                        model_name, routing_info, security_ctx, request_id
+                    )
 
             # Get model configuration
+            t2 = time.time()
             model_cfg = config_manager.get_model_by_name(model_name) or {}
             provider = model_cfg.get('provider', '')
+            logger.info(f"[{request_id}] ⏱️ Config lookup: {(time.time()-t2)*1000:.1f}ms")
 
             # Handle fake/test models
             if provider == 'fake' or model_name == 'fake':
@@ -86,10 +95,12 @@ class ModelExecutor:
                 raise ValueError(f"Model '{model_name}' is disabled")
 
             # Generate response using real model
+            t3 = time.time()
             result = await self._generate_real_response(
                 model_name, model_cfg, messages, temperature, max_tokens, 
                 features, start_time, request_id, routing_info
             )
+            logger.info(f"[{request_id}] ⏱️ Model execution: {(time.time()-t3)*1000:.1f}ms")
             
             # Record success metrics
             model_manager = get_model_manager_sync()
@@ -183,7 +194,7 @@ class ModelExecutor:
                 logger.warning(f"[{request_id}] Empty query for routing, using default model")
                 return self._get_fallback_model(), {}
 
-            logger.info(f"[{request_id}] Routing query: '{query[:100]}...'")
+            logger.debug(f"[{request_id}] Routing query: '{query[:100]}...'")
             
             # Use RouterV1: SLM analyzer + rule engine (slm_rules strategy)
             from .router_v1 import RouterV1
@@ -270,12 +281,14 @@ class ModelExecutor:
                                     start_time: float, request_id: str, routing_info: Optional[Dict]) -> Dict[str, Any]:
         """Generate response using real model providers."""
         # Build or reuse kernel
-
+        t_kernel_start = time.time()
         kernel = await self._get_kernel_for_model(model_name)
+        logger.info(f"[{request_id}] ⏱️ Kernel creation: {(time.time()-t_kernel_start)*1000:.1f}ms")
         if kernel is None:
             raise RuntimeError(f"Could not create kernel for model {model_name}")
 
         # Prepare chat history
+        t_history = time.time()
         chat_history = ChatHistory()
         if messages:
             for m in messages:
@@ -288,6 +301,7 @@ class ModelExecutor:
                     chat_history.add_message(ChatMessageContent(role=role, content=content))
         else:
             chat_history.add_message(ChatMessageContent(role='user', content=''))
+        logger.info(f"[{request_id}] ⏱️ Chat history prep: {(time.time()-t_history)*1000:.1f}ms")
 
         # Get chat completion service
         try:
@@ -297,6 +311,7 @@ class ModelExecutor:
             raise
 
         # Configure execution settings
+        t_exec_settings = time.time()
         execution_settings = kernel.get_prompt_execution_settings_from_service_id(
             service_id=chat_completion.service_id
         )
@@ -308,12 +323,14 @@ class ModelExecutor:
         plugins_available = len(list(kernel.plugins)) > 0
         if plugins_available and hasattr(execution_settings, 'function_choice_behavior'):
             execution_settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
-            logger.info(f"[{request_id}] Enabled function calling for {model_name}")
+            logger.debug(f"[{request_id}] Enabled function calling for {model_name}")
+        logger.info(f"[{request_id}] ⏱️ Execution settings: {(time.time()-t_exec_settings)*1000:.1f}ms")
 
         # Execute model inference
         try:
-            logger.info(f"[{request_id}] Calling {model_name} (provider: {model_cfg.get('provider')})")
+            logger.debug(f"[{request_id}] Calling {model_name} (provider: {model_cfg.get('provider')})")
             
+            t_api_call = time.time()
             if plugins_available and hasattr(execution_settings, 'function_choice_behavior'):
                 response = await chat_completion.get_chat_message_contents(
                     chat_history=chat_history, settings=execution_settings, kernel=kernel
@@ -322,6 +339,8 @@ class ModelExecutor:
                 response = await chat_completion.get_chat_message_contents(
                     chat_history=chat_history, settings=execution_settings
                 )
+            api_latency = (time.time()-t_api_call)*1000
+            logger.info(f"[{request_id}] ⏱️ 🔥 ACTUAL API CALL: {api_latency:.1f}ms")
 
             if not response:
                 raise RuntimeError('Empty response from model provider')
@@ -376,7 +395,7 @@ class ModelExecutor:
                 'meta': meta
             }
             
-            logger.info(f"[{request_id}] Response generated successfully ({usage['total_tokens']} tokens)")
+            logger.debug(f"[{request_id}] Response generated successfully ({usage['total_tokens']} tokens)")
             return result
 
         except Exception as e:
@@ -622,7 +641,12 @@ class ModelExecutor:
                     logger.warning(f"[{request_id}] (stream) Routed model {model_name} unavailable, using fallback")
                     model_name = self._get_fallback_model()
             else:
-                routing_info = None
+                # Even for explicit models, provide basic routing info for frontend
+                routing_info = {
+                    "model": model_name,
+                    "routing_method": "explicit",
+                    "original_model": original_model,
+                }
 
             if security_ctx and routing_info:
                 model_name, routing_info = self._enforce_security_policies(
@@ -857,11 +881,13 @@ class ModelExecutor:
         """Get or create a Semantic Kernel instance for the specified model."""
         cache_key = f"base_{model_name}"
         
-        # Return cached kernel copy if available
+        # Return cached kernel directly (Kernel is stateless and thread-safe)
         if cache_key in self._kernel_cache:
-            base_kernel = self._kernel_cache[cache_key]
-            return self._copy_kernel(base_kernel)
+            logger.info(f"✅ Kernel cache HIT for {model_name} (cache size: {len(self._kernel_cache)})")
+            return self._kernel_cache[cache_key]
 
+        logger.warning(f"⚠️ Kernel cache MISS for {model_name} - creating new kernel (current cache: {list(self._kernel_cache.keys())})")
+        
         # Create new kernel for model
         model_config = config_manager.get_model_by_name(model_name)
         if not model_config:
@@ -897,14 +923,15 @@ class ModelExecutor:
                 kernel.add_service(service)
                 
             elif provider == 'ollama':
-                import requests, json
+                import aiohttp
+                import asyncio
 
                 base_url = model_config.get('endpoint', 'http://127.0.0.1:11434')
                 model_name = model_config.get('name')
                 logger.info(f"Registering Ollama provider for {model_name} at {base_url}")
 
                 class OllamaChatCompletion(ChatCompletionClientBase):
-                    """Minimal Ollama connector compatible with Semantic Kernel chat interface."""
+                    """Optimized Ollama connector using native /api/chat endpoint with async HTTP."""
                     def __init__(self, base_url: str, model_name: str):
                         super().__init__(service_id=f"ollama_{model_name}",
                                          ai_model_id=model_name)
@@ -912,38 +939,38 @@ class ModelExecutor:
                         self._model_name = model_name
 
                     async def get_chat_message_contents(self, chat_history: ChatHistory, settings=None, **kwargs):
-                        # 將聊天紀錄轉成 Ollama prompt
+                        # 使用 Ollama 原生 Chat API 格式（異步優化）
                         messages = []
                         for msg in chat_history.messages:
                             role = getattr(msg, 'role', 'user')
                             content = getattr(msg, 'content', '')
                             messages.append({"role": role, "content": content})
 
-                        prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
-
                         payload = {
                             "model": self._model_name,
-                            "prompt": prompt,
+                            "messages": messages,  # 使用結構化消息格式
                             "stream": False
                         }
 
-                        logger.info(f"Calling Ollama API: {self._base_url}/api/generate, model={self._model_name}")
+                        logger.debug(f"Calling Ollama Chat API: {self._base_url}/api/chat, model={self._model_name}")
 
                         try:
-                            resp = requests.post(f"{self._base_url}/api/generate", json=payload, timeout=120)
-                            resp.raise_for_status()
-                            output = ""
-                            for line in resp.iter_lines():
-                                if line:
-                                    data = line.decode("utf-8")
-                                    if data.startswith("data: "):
-                                        json_obj = json.loads(data[6:])
-                                        if "response" in json_obj:
-                                            output += json_obj["response"]
-                                        if json_obj.get("done"):
-                                            break
+                            # 使用異步 HTTP 客戶端避免阻塞事件循環
+                            timeout = aiohttp.ClientTimeout(total=120)
+                            async with aiohttp.ClientSession(timeout=timeout) as session:
+                                async with session.post(
+                                    f"{self._base_url}/api/chat",
+                                    json=payload
+                                ) as resp:
+                                    resp.raise_for_status()
+                                    result = await resp.json()
+                            
+                            # 提取響應內容
+                            output = result.get("message", {}).get("content", "")
                             if not output:
-                                output = resp.text
+                                logger.warning(f"Empty response from Ollama chat API")
+                                output = ""
+                            
                             return [ChatMessageContent(role="assistant", content=output.strip())]
 
                         except Exception as e:
@@ -960,21 +987,13 @@ class ModelExecutor:
                 
             # Cache the configured kernel
             self._kernel_cache[cache_key] = kernel
-            logger.info(f"Created and cached kernel for model: {model_name} (provider: {provider})")
+            logger.debug(f"Created and cached kernel for model: {model_name} (provider: {provider})")
             
-            # Return fresh copy
-            return self._copy_kernel(kernel)
+            return kernel
             
         except Exception as e:
             logger.error(f"Failed to create kernel for {model_name}: {e}")
             return None
-
-    def _copy_kernel(self, base_kernel: sk.Kernel) -> sk.Kernel:
-        """Create a fresh copy of a kernel with the same services."""
-        new_kernel = sk.Kernel()
-        for service in base_kernel.services.values():
-            new_kernel.add_service(service)
-        return new_kernel
 
     def clear_cache(self):
         """Clear kernel cache - useful for configuration reloads."""

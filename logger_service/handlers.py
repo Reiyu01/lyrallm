@@ -16,7 +16,7 @@ class BaseHandler:
 
 class DbHandler(BaseHandler):
     """Handler that persists token usage via the configured analytics adapter."""
-    background = False
+    background = True  # 改為 True，避免阻塞主請求響應
 
     def __init__(self):
         # use adapter factory for pluggable backends (Postgres / Elasticsearch / etc.)
@@ -87,9 +87,13 @@ def get_handlers() -> List[BaseHandler]:
     storages_cfg = cfg.get('storages', {}) or {}
     analytics_cfg = storages_cfg.get('analytics', {}) or {}
     analytics_type = (analytics_cfg.get('type') or analytics_cfg.get('adapter') or analytics_cfg.get('backend') or '').lower()
-    logger.info(f"Logger handlers init - database_cfg_present={bool(db_cfg)} analytics_cfg={analytics_cfg} analytics_type={analytics_type}")
+    
+    # 性能優化：檢查是否禁用 analytics（用於測試）
+    analytics_enabled = analytics_cfg.get('enabled', True) if analytics_cfg else (bool(db_cfg) or bool(analytics_type))
+    
+    logger.info(f"Logger handlers init - analytics_enabled={analytics_enabled} database_cfg_present={bool(db_cfg)} analytics_cfg={analytics_cfg} analytics_type={analytics_type}")
 
-    if db_cfg or analytics_cfg or analytics_type:
+    if analytics_enabled and (db_cfg or analytics_cfg or analytics_type):
         # Adapter factory will route to Postgres or Elasticsearch depending on config
         handlers.append(DbHandler())
 
