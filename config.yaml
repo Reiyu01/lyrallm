@@ -284,7 +284,12 @@ event_bus:
 storages:
   analytics:
     - type: mysql
-      dsn: "mysql+aiomysql://lyra:lyrapassword@127.0.0.1:3307/lyra_tokens"
+      dsn: "${MYSQL_DSN}"
+      host: "${MYSQL_HOST}"
+      port: "${MYSQL_PORT}"
+      user: "${MYSQL_USERNAME}"
+      password: "${MYSQL_PASSWORD}"
+      database: "${MYSQL_DATABASE}"
     - type: elasticsearch
       es:
         endpoint: "http://127.0.0.1:9200"

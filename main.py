@@ -32,6 +32,7 @@ from lyrallm.config.config_manager import config_manager
 from lyrallm.logger_service.event_consumer import start_event_consumer
 from api.models import router as models_router
 from api.chat import router as chat_router
+from api.token_usage import router as token_usage_router
 
 # 設定日誌
 logging_config = config_manager.get_logging_config()
@@ -118,6 +119,7 @@ app.add_middleware(
 # 註冊路由
 app.include_router(models_router, tags=["Models"])
 app.include_router(chat_router, tags=["Chat"])
+app.include_router(token_usage_router, tags=["Token Usage"])
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

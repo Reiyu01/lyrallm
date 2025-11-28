@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
@@ -20,8 +21,30 @@ class MySQLAdapter:
     """Async adapter for aggregated token usage accounting in MySQL."""
 
     def __init__(self, dsn: Optional[str] = None, config: Optional[Dict[str, Any]] = None):
-        self._dsn = dsn
-        self._config = config or {}
+        env_dsn = os.getenv("MYSQL_DSN")
+        self._dsn = dsn or env_dsn
+
+        merged_cfg: Dict[str, Any] = dict(config or {})
+        env_overrides = {
+            "host": os.getenv("MYSQL_HOST"),
+            "port": os.getenv("MYSQL_PORT"),
+            "user": os.getenv("MYSQL_USERNAME"),
+            "username": os.getenv("MYSQL_USERNAME"),
+            "password": os.getenv("MYSQL_PASSWORD"),
+            "database": os.getenv("MYSQL_DATABASE"),
+            "db": os.getenv("MYSQL_DATABASE"),
+        }
+        for key, value in env_overrides.items():
+            if value and key not in merged_cfg:
+                if key == "port":
+                    try:
+                        merged_cfg[key] = int(value)
+                    except ValueError:
+                        merged_cfg[key] = value
+                else:
+                    merged_cfg[key] = value
+
+        self._config = merged_cfg
         self._pool: Optional[Any] = None
         self._schema_ensured = False
 
@@ -120,6 +143,7 @@ class MySQLAdapter:
             await self.connect()
         if not self._pool:
             return []
+        await self._ensure_schema()
         sql = (
             "SELECT user_id, interval_start, interval_end, "
             "prompt_tokens, completion_tokens, total_tokens, created_at "
@@ -130,6 +154,41 @@ class MySQLAdapter:
                 await cur.execute(sql, (int(limit),))
                 rows = await cur.fetchall()
                 return [dict(row) for row in rows]
+
+    async def query_user_total_tokens(self, user_id: str) -> Dict[str, int]:
+        """Aggregate total token usage for a single user."""
+        if not user_id:
+            return {"user_id": user_id, "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
+
+        if not HAS_AIOMYSQL:
+            return {"user_id": user_id, "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
+
+        if not self._pool:
+            await self.connect()
+        if not self._pool:
+            return {"user_id": user_id, "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
+
+        await self._ensure_schema()
+
+        sql = (
+            "SELECT "
+            "COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, "
+            "COALESCE(SUM(completion_tokens), 0) AS completion_tokens, "
+            "COALESCE(SUM(total_tokens), 0) AS total_tokens "
+            "FROM token_usage_aggregate WHERE user_id = %s"
+        )
+
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:  # type: ignore[attr-defined]
+                await cur.execute(sql, (user_id,))
+                row = await cur.fetchone() or {}
+
+        return {
+            "user_id": user_id,
+            "prompt_tokens": int(row.get("prompt_tokens", 0) or 0),
+            "completion_tokens": int(row.get("completion_tokens", 0) or 0),
+            "total_tokens": int(row.get("total_tokens", 0) or 0),
+        }
 
     def _build_pool_params(self) -> Dict[str, Any]:
         params: Dict[str, Any] = {"autocommit": True}
