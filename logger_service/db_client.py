@@ -58,6 +58,7 @@ class PostgresClient:
             total_tokens INTEGER NOT NULL,
             cost_usd NUMERIC(18,8) NOT NULL,
             user_id TEXT,
+            session_id TEXT,
             endpoint TEXT,
             status TEXT,
             raw JSONB,
@@ -84,8 +85,8 @@ class PostgresClient:
             await conn.execute(
                 """
                 INSERT INTO token_usage(request_id, timestamp, model_name, prompt_tokens,
-                    completion_tokens, total_tokens, cost_usd, user_id, endpoint, status, raw)
-                VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    completion_tokens, total_tokens, cost_usd, user_id, session_id, endpoint, status, raw)
+                VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 """,
                 token_usage.get('request_id'),
                 token_usage.get('timestamp'),
@@ -95,6 +96,7 @@ class PostgresClient:
                 int(token_usage.get('total_tokens', 0)),
                 float(token_usage.get('cost_usd', 0.0)),
                 token_usage.get('user_id'),
+                token_usage.get('session_id'),
                 token_usage.get('endpoint'),
                 token_usage.get('status'),
                 token_usage,

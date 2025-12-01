@@ -30,10 +30,15 @@ load_dotenv()
 
 from lyrallm.config.config_manager import config_manager
 from lyrallm.logger_service.event_consumer import start_event_consumer
+from lyrallm.auth.session_manager import (
+    SESSION_COOKIE_NAME,
+    cookie_kwargs,
+    generate_session_id,
+    normalize_session_id,
+)
 from api.models import router as models_router
 from api.chat import router as chat_router
 from api.token_usage import router as token_usage_router
-
 # 設定日誌
 logging_config = config_manager.get_logging_config()
 logging.basicConfig(
@@ -110,7 +115,10 @@ app = FastAPI(
 # 設定 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://163.18.26.233:3000",  # 若有別的前端網域就加在這裡
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -122,22 +130,36 @@ app.include_router(chat_router, tags=["Chat"])
 app.include_router(token_usage_router, tags=["Token Usage"])
 
 @app.middleware("http")
+async def ensure_session_cookie(request: Request, call_next):
+    """確保每個請求都有有效的 session cookie."""
+    current_session = normalize_session_id(request.cookies.get(SESSION_COOKIE_NAME))
+    new_session = None
+    if not current_session:
+        new_session = generate_session_id()
+        current_session = new_session
+
+    request.state.session_id = current_session
+    response = await call_next(request)
+    if new_session:
+        response.set_cookie(SESSION_COOKIE_NAME, current_session, **cookie_kwargs())
+    return response
+
+
+@app.middleware("http")
 async def log_requests(request: Request, call_next):
     """記錄所有請求"""
     start_time = time.time()
-    
+
     # 記錄請求
     logger.info(f"請求: {request.method} {request.url}")
-    
+
     # 處理請求
     response = await call_next(request)
-    
+
     # 計算處理時間
     process_time = time.time() - start_time
     logger.info(f"回應: {response.status_code} - 處理時間: {process_time:.4f}秒")
-    
-    return response
-    
+
     return response
 
 @app.exception_handler(Exception)

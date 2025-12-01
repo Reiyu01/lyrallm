@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 WINDOW_INTERVAL_SECONDS = 300
+DEFAULT_SESSION_ID = "default"
 
 
 class MySQLAdapter:
@@ -89,6 +90,10 @@ class MySQLAdapter:
             logger.debug("MySQLAdapter.write_token_usage skipped: missing user_id")
             return
 
+        raw_session = event.get("session_id") or event.get("session") or DEFAULT_SESSION_ID
+        session_id = str(raw_session).strip() or DEFAULT_SESSION_ID
+        session_id = session_id[:191]
+
         prompt_tokens = self._as_int(event.get("prompt_tokens"))
         completion_tokens = self._as_int(event.get("completion_tokens"))
         total_tokens = self._as_int(event.get("total_tokens"))
@@ -111,13 +116,14 @@ class MySQLAdapter:
             await conn.begin()
             try:
                 async with conn.cursor(aiomysql.DictCursor) as cur:  # type: ignore[attr-defined]
-                    row = await self._fetch_window_for_update(cur, user_id)
-                    row, _ = await self._roll_window_if_needed(cur, user_id, row, now)
+                    row = await self._fetch_window_for_update(cur, user_id, session_id)
+                    row, _ = await self._roll_window_if_needed(cur, user_id, session_id, row, now)
 
                     if row is None:
                         await self._insert_new_window(
                             cur,
                             user_id,
+                            session_id,
                             now,
                             prompt_tokens,
                             completion_tokens,
@@ -127,6 +133,7 @@ class MySQLAdapter:
                         await self._increment_window(
                             cur,
                             user_id,
+                            session_id,
                             prompt_tokens,
                             completion_tokens,
                             total_tokens,
@@ -145,7 +152,7 @@ class MySQLAdapter:
             return []
         await self._ensure_schema()
         sql = (
-            "SELECT user_id, interval_start, interval_end, "
+            "SELECT user_id, session_id, interval_start, interval_end, "
             "prompt_tokens, completion_tokens, total_tokens, created_at "
             "FROM token_usage_aggregate ORDER BY interval_end DESC LIMIT %s"
         )
@@ -244,13 +251,15 @@ class MySQLAdapter:
         stmts = [
             (
                 "CREATE TABLE IF NOT EXISTS token_usage_window ("
-                "user_id VARCHAR(191) PRIMARY KEY,"
+                "user_id VARCHAR(191) NOT NULL,"
+                "session_id VARCHAR(191) NOT NULL,"
                 "interval_start DATETIME(6) NOT NULL,"
                 "next_cutoff DATETIME(6) NOT NULL,"
                 "accum_prompt_tokens INT NOT NULL DEFAULT 0,"
                 "accum_completion_tokens INT NOT NULL DEFAULT 0,"
                 "accum_total_tokens INT NOT NULL DEFAULT 0,"
                 "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                "PRIMARY KEY (user_id, session_id),"
                 "KEY idx_token_usage_window_cutoff (next_cutoff)"
                 ") ENGINE=InnoDB"
             ),
@@ -258,13 +267,14 @@ class MySQLAdapter:
                 "CREATE TABLE IF NOT EXISTS token_usage_aggregate ("
                 "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 "user_id VARCHAR(191) NOT NULL,"
+                "session_id VARCHAR(191) NOT NULL,"
                 "interval_start DATETIME(6) NOT NULL,"
                 "interval_end DATETIME(6) NOT NULL,"
                 "prompt_tokens INT NOT NULL,"
                 "completion_tokens INT NOT NULL,"
                 "total_tokens INT NOT NULL,"
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-                "KEY idx_token_usage_aggregate_user (user_id, interval_start),"
+                "KEY idx_token_usage_aggregate_user (user_id, session_id, interval_start),"
                 "KEY idx_token_usage_aggregate_end (interval_end)"
                 ") ENGINE=InnoDB"
             ),
@@ -330,7 +340,7 @@ class MySQLAdapter:
             try:
                 async with conn.cursor(aiomysql.DictCursor) as cur:  # type: ignore[attr-defined]
                     await cur.execute(
-                        "SELECT user_id, interval_start, next_cutoff, "
+                        "SELECT user_id, session_id, interval_start, next_cutoff, "
                         "accum_prompt_tokens, accum_completion_tokens, accum_total_tokens "
                         "FROM token_usage_window "
                         "WHERE next_cutoff <= %s "
@@ -340,7 +350,7 @@ class MySQLAdapter:
                     rows = await cur.fetchall()
                     for row in rows:
                         _, flushed = await self._roll_window_if_needed(
-                            cur, row["user_id"], row, current
+                            cur, row["user_id"], row["session_id"], row, current
                         )
                         written += flushed
                 await conn.commit()
@@ -350,12 +360,12 @@ class MySQLAdapter:
 
         return written
 
-    async def _fetch_window_for_update(self, cur: Any, user_id: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_window_for_update(self, cur: Any, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
         await cur.execute(
-            "SELECT user_id, interval_start, next_cutoff, accum_prompt_tokens, "
+            "SELECT user_id, session_id, interval_start, next_cutoff, accum_prompt_tokens, "
             "accum_completion_tokens, accum_total_tokens "
-            "FROM token_usage_window WHERE user_id = %s FOR UPDATE",
-            (user_id,),
+            "FROM token_usage_window WHERE user_id = %s AND session_id = %s FOR UPDATE",
+            (user_id, session_id),
         )
         return await cur.fetchone()
 
@@ -363,6 +373,7 @@ class MySQLAdapter:
         self,
         cur: Any,
         user_id: str,
+        session_id: str,
         row: Optional[Dict[str, Any]],
         current_time: datetime,
     ) -> Tuple[Optional[Dict[str, Any]], int]:
@@ -382,9 +393,9 @@ class MySQLAdapter:
             if total > 0:
                 await cur.execute(
                     "INSERT INTO token_usage_aggregate "
-                    "(user_id, interval_start, interval_end, prompt_tokens, completion_tokens, total_tokens) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (user_id, interval_start, next_cutoff, prompt, completion, total),
+                    "(user_id, session_id, interval_start, interval_end, prompt_tokens, completion_tokens, total_tokens) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (user_id, session_id, interval_start, next_cutoff, prompt, completion, total),
                 )
                 flushed += 1
                 interval_start = next_cutoff
@@ -395,8 +406,8 @@ class MySQLAdapter:
                 dirty = True
             else:
                 await cur.execute(
-                    "DELETE FROM token_usage_window WHERE user_id = %s",
-                    (user_id,),
+                    "DELETE FROM token_usage_window WHERE user_id = %s AND session_id = %s",
+                    (user_id, session_id),
                 )
                 return None, flushed
 
@@ -404,13 +415,14 @@ class MySQLAdapter:
             await cur.execute(
                 "UPDATE token_usage_window SET interval_start = %s, next_cutoff = %s, "
                 "accum_prompt_tokens = %s, accum_completion_tokens = %s, accum_total_tokens = %s "
-                "WHERE user_id = %s",
-                (interval_start, next_cutoff, prompt, completion, total, user_id),
+                "WHERE user_id = %s AND session_id = %s",
+                (interval_start, next_cutoff, prompt, completion, total, user_id, session_id),
             )
 
         return (
             {
                 "user_id": user_id,
+                "session_id": session_id,
                 "interval_start": interval_start,
                 "next_cutoff": next_cutoff,
                 "accum_prompt_tokens": prompt,
@@ -424,6 +436,7 @@ class MySQLAdapter:
         self,
         cur: Any,
         user_id: str,
+        session_id: str,
         start_time: datetime,
         prompt_tokens: int,
         completion_tokens: int,
@@ -431,16 +444,17 @@ class MySQLAdapter:
     ) -> None:
         cutoff = start_time + timedelta(seconds=WINDOW_INTERVAL_SECONDS)
         await cur.execute(
-            "INSERT INTO token_usage_window (user_id, interval_start, next_cutoff, "
+            "INSERT INTO token_usage_window (user_id, session_id, interval_start, next_cutoff, "
             "accum_prompt_tokens, accum_completion_tokens, accum_total_tokens) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
-            (user_id, start_time, cutoff, prompt_tokens, completion_tokens, total_tokens),
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (user_id, session_id, start_time, cutoff, prompt_tokens, completion_tokens, total_tokens),
         )
 
     async def _increment_window(
         self,
         cur: Any,
         user_id: str,
+        session_id: str,
         prompt_tokens: int,
         completion_tokens: int,
         total_tokens: int,
@@ -450,8 +464,8 @@ class MySQLAdapter:
             "accum_prompt_tokens = accum_prompt_tokens + %s, "
             "accum_completion_tokens = accum_completion_tokens + %s, "
             "accum_total_tokens = accum_total_tokens + %s "
-            "WHERE user_id = %s",
-            (prompt_tokens, completion_tokens, total_tokens, user_id),
+            "WHERE user_id = %s AND session_id = %s",
+            (prompt_tokens, completion_tokens, total_tokens, user_id, session_id),
         )
 
 

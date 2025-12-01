@@ -14,6 +14,7 @@ class TokenUsage(BaseModel):
     total_tokens: int
     cost_usd: float
     user_id: Optional[str] = None
+    session_id: Optional[str] = None
     endpoint: str = "/v1/chat/completions"
     status: str = "success"
     

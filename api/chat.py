@@ -472,8 +472,17 @@ async def create_chat_completion(self, model_name: str, messages: List[ChatMessa
 
 from lyrallm.logger_service.event_bus import event_bus as global_event_bus
 
-async def track_token_usage(request_id: str, model_name: str, usage: Optional[ChatCompletionUsage],
-                          start_time: datetime, status: str, user_id: Optional[str] = None, messages: Optional[List[ChatMessage]] = None, response_text: Optional[str] = None):
+async def track_token_usage(
+    request_id: str,
+    model_name: str,
+    usage: Optional[ChatCompletionUsage],
+    start_time: datetime,
+    status: str,
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    messages: Optional[List[ChatMessage]] = None,
+    response_text: Optional[str] = None,
+):
     """
     設定的 Token Usage 追蹤 - SK 僅限於內部和發送
     所有性能指標都由 Logger Service 自動記錄
@@ -525,6 +534,7 @@ async def track_token_usage(request_id: str, model_name: str, usage: Optional[Ch
             total_tokens=total_tokens,
             cost_usd=round(cost_usd, 6),
             user_id=user_id,
+            session_id=session_id,
             endpoint="/api/chat/completions",
             status=status
         )
@@ -903,6 +913,7 @@ async def create_chat_completion(
                                     start_time=start_time,
                                     status="success",
                                     user_id=security_ctx.user_id,
+                                    session_id=security_ctx.session_id,
                                     messages=request.messages,
                                     response_text=final_text or ""
                                 )
@@ -930,6 +941,7 @@ async def create_chat_completion(
                     start_time=start_time,
                     status="success",
                     user_id=security_ctx.user_id,
+                    session_id=security_ctx.session_id,
                     messages=request.messages,
                     response_text=response.choices[0].message.content
                 )
@@ -1073,6 +1085,7 @@ async def create_chat_completion(
                                 start_time=start_time,
                                 status=status,
                                 user_id=security_ctx.user_id,
+                                session_id=security_ctx.session_id,
                                 messages=request.messages,
                                 response_text=full_text or ""
                             )
@@ -1126,6 +1139,7 @@ async def create_chat_completion(
                 start_time=start_time,
                 status="success",
                 user_id=security_ctx.user_id,
+                session_id=security_ctx.session_id,
                 messages=request.messages,
                 response_text=response.choices[0].message.content
             )
@@ -1154,6 +1168,7 @@ async def create_chat_completion(
             start_time=start_time,
             status="http_error",
             user_id=security_ctx.user_id,
+            session_id=security_ctx.session_id,
             messages=request.messages
         )
         raise
@@ -1168,6 +1183,7 @@ async def create_chat_completion(
             start_time=start_time,
             status="system_error",
             user_id=security_ctx.user_id,
+            session_id=security_ctx.session_id,
             messages=request.messages
         )
         logger.error(f"[{request_id}] 聊天完成失敗: {e}")
