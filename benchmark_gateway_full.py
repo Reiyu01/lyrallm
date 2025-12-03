@@ -199,13 +199,42 @@ class GatewayBenchmark:
             if stream:
                 response = requester.post(url, json=payload, timeout=timeout, stream=True)
                 if response.status_code == 200:
-                    first_chunk = True
+                    first_content_chunk = True
                     for line in response.iter_lines():
                         if line:
-                            if first_chunk:
-                                ttft = (time.perf_counter() - start) * 1000
-                                first_chunk = False
-                            tokens += 1
+                            # 解析 SSE 格式，只有包含 choices[].delta.content 的才計入 TTFT
+                            try:
+                                line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+                                if line_str.startswith('data: '):
+                                    json_str = line_str[6:].strip()
+                                    if json_str == '[DONE]':
+                                        continue
+                                    data = json.loads(json_str)
+                                    
+                                    # LyraLLM 格式：檢查 choices[].delta.content 是否存在
+                                    has_content = False
+                                    if 'choices' in data and isinstance(data['choices'], list):
+                                        for choice in data['choices']:
+                                            if isinstance(choice, dict) and 'delta' in choice:
+                                                delta = choice['delta']
+                                                if isinstance(delta, dict) and 'content' in delta and delta['content']:
+                                                    has_content = True
+                                                    break
+                                    
+                                    # 只有實際內容才計入 TTFT
+                                    if has_content and first_content_chunk:
+                                        ttft = (time.perf_counter() - start) * 1000
+                                        first_content_chunk = False
+                                    
+                                    # 計算 token 數（有內容或是 final）
+                                    if has_content or 'usage' in data:
+                                        tokens += 1
+                            except (json.JSONDecodeError, UnicodeDecodeError):
+                                # 非 JSON 格式，按舊邏輯處理
+                                if first_content_chunk:
+                                    ttft = (time.perf_counter() - start) * 1000
+                                    first_content_chunk = False
+                                tokens += 1
                     latency = (time.perf_counter() - start) * 1000
                     return RequestResult(success=True, latency_ms=latency, ttft_ms=ttft, tokens_generated=tokens)
                 else:
@@ -468,18 +497,28 @@ class GatewayBenchmark:
             method_results = []
             start_time = time.perf_counter()
             
-            def worker(idx: int) -> RequestResult:
-                # 每個線程使用自己的 Session
+            # 創建共享 Session 連接池（提升並發效率）
+            shared_session = None
+            if method_key in ["lyrallm", "ollama"]:
+                shared_session = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=concurrency,
+                    pool_maxsize=concurrency * 2,
+                    max_retries=0
+                )
+                shared_session.mount('http://', adapter)
+                shared_session.mount('https://', adapter)
+            
+            def worker(idx: int, sess: Optional[requests.Session] = None) -> RequestResult:
+                # 使用共享 Session 連接池
                 if method_key in ["lyrallm", "ollama"]:
-                    session = requests.Session()
-                    result = request_func(prompt, session=session)
-                    session.close()
+                    result = request_func(prompt, session=sess)
                 else:
                     result = request_func(prompt)
                 return result
             
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = [executor.submit(worker, i) for i in range(total_requests)]
+                futures = [executor.submit(worker, i, shared_session) for i in range(total_requests)]
                 
                 completed = 0
                 for future in as_completed(futures):
@@ -492,6 +531,10 @@ class GatewayBenchmark:
                         print(f"  完成: {completed}/{total_requests}")
             
             total_time = time.perf_counter() - start_time
+            
+            # 關閉共享 Session
+            if shared_session:
+                shared_session.close()
             
             self.results[method_key] = method_results
             stats = self._calculate_stats(method_results, method_name, total_time)

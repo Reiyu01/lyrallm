@@ -15,8 +15,46 @@ from semantic_kernel.contents.chat_message_content import ChatMessageContent
 from semantic_kernel.connectors.ai import FunctionChoiceBehavior
 
 import httpx
+import aiohttp
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# Global Connection Pool Management
+# ============================================================
+_global_aiohttp_session: Optional[aiohttp.ClientSession] = None
+
+
+async def get_global_session() -> aiohttp.ClientSession:
+    """Get or create global aiohttp session for connection pooling."""
+    global _global_aiohttp_session
+    if _global_aiohttp_session is None or _global_aiohttp_session.closed:
+        timeout = aiohttp.ClientTimeout(total=120, connect=10)
+        connector = aiohttp.TCPConnector(
+            limit=100,           # Max concurrent connections
+            limit_per_host=30,   # Max per host
+            keepalive_timeout=60 # Keep connections alive
+        )
+        _global_aiohttp_session = aiohttp.ClientSession(
+            timeout=timeout,
+            connector=connector
+        )
+        logger.info("🔌 Created global aiohttp session with connection pooling")
+    return _global_aiohttp_session
+
+
+async def close_global_session():
+    """Close global session (call on app shutdown)."""
+    global _global_aiohttp_session
+    if _global_aiohttp_session and not _global_aiohttp_session.closed:
+        await _global_aiohttp_session.close()
+        _global_aiohttp_session = None
+        logger.info("🔌 Closed global aiohttp session")
+
+
+def _normalize_model_name(model_name: str) -> str:
+    """Normalize model name for consistent cache keys."""
+    return model_name.strip().lower()
 
 
 class ModelExecutor:
@@ -26,6 +64,7 @@ class ModelExecutor:
     - Auto model selection via semantic routing
     - Multi-provider support (Azure OpenAI, OpenAI, Ollama)
     - Kernel caching for performance
+    - Request-level config caching
     - Comprehensive error handling and fallback strategies
     - Token usage tracking
     """
@@ -33,6 +72,19 @@ class ModelExecutor:
     def __init__(self):
         # Kernel cache for performance optimization
         self._kernel_cache: Dict[str, sk.Kernel] = {}
+        # Request-level config cache (cleared per request)
+        self._config_cache: Dict[str, Dict] = {}
+
+    def _get_cached_model_config(self, model_name: str) -> Optional[Dict]:
+        """Get model config with request-level caching."""
+        normalized = _normalize_model_name(model_name)
+        if normalized not in self._config_cache:
+            self._config_cache[normalized] = config_manager.get_model_by_name(model_name)
+        return self._config_cache[normalized]
+
+    def _clear_request_cache(self):
+        """Clear request-level cache (call at request end if needed)."""
+        self._config_cache.clear()
 
     async def generate(self, model_name: str, messages: Optional[List[Any]] = None,
                        temperature: float = 0.7, max_tokens: Optional[int] = None,
@@ -77,11 +129,9 @@ class ModelExecutor:
                         model_name, routing_info, security_ctx, request_id
                     )
 
-            # Get model configuration
-            t2 = time.time()
-            model_cfg = config_manager.get_model_by_name(model_name) or {}
+            # Get model configuration (with caching)
+            model_cfg = self._get_cached_model_config(model_name) or {}
             provider = model_cfg.get('provider', '')
-            logger.info(f"[{request_id}] ⏱️ Config lookup: {(time.time()-t2)*1000:.1f}ms")
 
             # Handle fake/test models
             if provider == 'fake' or model_name == 'fake':
@@ -100,7 +150,7 @@ class ModelExecutor:
                 model_name, model_cfg, messages, temperature, max_tokens, 
                 features, start_time, request_id, routing_info
             )
-            logger.info(f"[{request_id}] ⏱️ Model execution: {(time.time()-t3)*1000:.1f}ms")
+            logger.debug(f"[{request_id}] Model execution: {(time.time()-t3)*1000:.1f}ms")
             
             # Record success metrics
             model_manager = get_model_manager_sync()
@@ -242,7 +292,7 @@ class ModelExecutor:
 
     def _is_model_available(self, model_name: str) -> bool:
         """Check if model is available and enabled."""
-        model_config = config_manager.get_model_by_name(model_name)
+        model_config = self._get_cached_model_config(model_name)
         return model_config and model_config.get('enabled', False)
 
     def _get_fallback_model(self) -> str:
@@ -283,7 +333,7 @@ class ModelExecutor:
         # Build or reuse kernel
         t_kernel_start = time.time()
         kernel = await self._get_kernel_for_model(model_name)
-        logger.info(f"[{request_id}] ⏱️ Kernel creation: {(time.time()-t_kernel_start)*1000:.1f}ms")
+        logger.debug(f"[{request_id}] Kernel acquisition: {(time.time()-t_kernel_start)*1000:.1f}ms")
         if kernel is None:
             raise RuntimeError(f"Could not create kernel for model {model_name}")
 
@@ -301,7 +351,7 @@ class ModelExecutor:
                     chat_history.add_message(ChatMessageContent(role=role, content=content))
         else:
             chat_history.add_message(ChatMessageContent(role='user', content=''))
-        logger.info(f"[{request_id}] ⏱️ Chat history prep: {(time.time()-t_history)*1000:.1f}ms")
+        logger.debug(f"[{request_id}] Chat history prep: {(time.time()-t_history)*1000:.1f}ms")
 
         # Get chat completion service
         try:
@@ -324,7 +374,7 @@ class ModelExecutor:
         if plugins_available and hasattr(execution_settings, 'function_choice_behavior'):
             execution_settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
             logger.debug(f"[{request_id}] Enabled function calling for {model_name}")
-        logger.info(f"[{request_id}] ⏱️ Execution settings: {(time.time()-t_exec_settings)*1000:.1f}ms")
+        logger.debug(f"[{request_id}] Execution settings: {(time.time()-t_exec_settings)*1000:.1f}ms")
 
         # Execute model inference
         try:
@@ -340,7 +390,7 @@ class ModelExecutor:
                     chat_history=chat_history, settings=execution_settings
                 )
             api_latency = (time.time()-t_api_call)*1000
-            logger.info(f"[{request_id}] ⏱️ 🔥 ACTUAL API CALL: {api_latency:.1f}ms")
+            logger.debug(f"[{request_id}] API call completed: {api_latency:.1f}ms")
 
             if not response:
                 raise RuntimeError('Empty response from model provider')
@@ -653,7 +703,7 @@ class ModelExecutor:
                     model_name, routing_info, security_ctx, request_id
                 )
 
-            model_cfg = config_manager.get_model_by_name(model_name) or {}
+            model_cfg = self._get_cached_model_config(model_name) or {}
             provider = model_cfg.get("provider", "")
             if not model_cfg or not model_cfg.get("enabled", False):
                 raise ValueError(f"Model '{model_name}' is not available for streaming")
@@ -693,32 +743,29 @@ class ModelExecutor:
             ):
                 if not isinstance(raw_event, dict):
                     continue
-                chunk = dict(raw_event)
-                chunk.setdefault("model", model_name)
-                if routing_info and "routing_info" not in chunk:
-                    chunk["routing_info"] = routing_info
+                
+                # Minimal modification - avoid full dict copy
+                if "model" not in raw_event:
+                    raw_event["model"] = model_name
+                if routing_info and "routing_info" not in raw_event:
+                    raw_event["routing_info"] = routing_info
 
-                delta_text = self._extract_text_from_chunk(chunk)
+                delta_text = self._extract_text_from_chunk(raw_event)
                 if delta_text:
                     text_buffer += delta_text
 
-                if isinstance(chunk.get("usage"), dict):
-                    usage_from_provider = chunk["usage"]
+                if isinstance(raw_event.get("usage"), dict):
+                    usage_from_provider = raw_event["usage"]
 
-                yield {"type": "delta", "payload": chunk}
+                yield {"type": "delta", "payload": raw_event}
 
-            usage = usage_from_provider if isinstance(usage_from_provider, dict) else self._calculate_usage(messages, text_buffer)
+            usage = usage_from_provider or self._calculate_usage(messages, text_buffer)
 
-            updated_routing = dict(routing_info or {})
-            updated_routing["model"] = model_name
+            # Build final routing info
+            final_routing = routing_info.copy() if routing_info else {}
+            final_routing["model"] = model_name
 
-            meta = {
-                "latency_ms": int((time.time() - start_time) * 1000),
-                "provider": provider,
-                "routing_info": updated_routing,
-                "plugins_used": False,
-            }
-
+            # Build final response
             result = {
                 "id": f"chatcmpl-{int(time.time())}-{request_id}",
                 "created": int(time.time()),
@@ -726,8 +773,13 @@ class ModelExecutor:
                 "choices": [],
                 "usage": usage,
                 "text": text_buffer,
-                "meta": meta,
-                "routing_info": updated_routing,
+                "meta": {
+                    "latency_ms": int((time.time() - start_time) * 1000),
+                    "provider": provider,
+                    "routing_info": final_routing,
+                    "plugins_used": False,
+                },
+                "routing_info": final_routing,
                 "finish_reason": "stop",
                 "final_message": {
                     "role": "assistant",
@@ -739,7 +791,7 @@ class ModelExecutor:
 
             model_manager = get_model_manager_sync()
             if model_manager:
-                model_manager.record_request_success(model_name, meta["latency_ms"])
+                model_manager.record_request_success(model_name, result["meta"]["latency_ms"])
 
         except Exception as e:
             logger.error(f"[{request_id}] Streaming generation failed for model {model_name}: {e}")
@@ -879,17 +931,19 @@ class ModelExecutor:
 
     async def _get_kernel_for_model(self, model_name: str) -> Optional[sk.Kernel]:
         """Get or create a Semantic Kernel instance for the specified model."""
-        cache_key = f"base_{model_name}"
+        # Normalize model name for consistent cache key
+        normalized_name = _normalize_model_name(model_name)
+        cache_key = f"base_{normalized_name}"
         
         # Return cached kernel directly (Kernel is stateless and thread-safe)
         if cache_key in self._kernel_cache:
-            logger.info(f"✅ Kernel cache HIT for {model_name} (cache size: {len(self._kernel_cache)})")
+            logger.debug(f"✅ Kernel cache HIT for {model_name}")
             return self._kernel_cache[cache_key]
 
-        logger.warning(f"⚠️ Kernel cache MISS for {model_name} - creating new kernel (current cache: {list(self._kernel_cache.keys())})")
+        logger.info(f"⚠️ Kernel cache MISS for {model_name} - creating new kernel")
         
-        # Create new kernel for model
-        model_config = config_manager.get_model_by_name(model_name)
+        # Create new kernel for model (use cached config)
+        model_config = self._get_cached_model_config(model_name)
         if not model_config:
             logger.error(f"Model configuration not found: {model_name}")
             return None
@@ -923,62 +977,66 @@ class ModelExecutor:
                 kernel.add_service(service)
                 
             elif provider == 'ollama':
-                import aiohttp
-                import asyncio
-
-                base_url = model_config.get('endpoint', 'http://127.0.0.1:11434')
-                model_name = model_config.get('name')
-                logger.info(f"Registering Ollama provider for {model_name} at {base_url}")
+                ollama_base_url = model_config.get('endpoint', 'http://127.0.0.1:11434')
+                ollama_model = model_config.get('name')
+                logger.info(f"Registering Ollama provider for {ollama_model} at {ollama_base_url}")
 
                 class OllamaChatCompletion(ChatCompletionClientBase):
-                    """Optimized Ollama connector using native /api/chat endpoint with async HTTP."""
+                    """Optimized Ollama connector using global connection pool."""
+                    
                     def __init__(self, base_url: str, model_name: str):
-                        super().__init__(service_id=f"ollama_{model_name}",
-                                         ai_model_id=model_name)
+                        super().__init__(
+                            service_id=f"ollama_{model_name}",
+                            ai_model_id=model_name
+                        )
                         self._base_url = base_url
                         self._model_name = model_name
 
-                    async def get_chat_message_contents(self, chat_history: ChatHistory, settings=None, **kwargs):
-                        # 使用 Ollama 原生 Chat API 格式（異步優化）
-                        messages = []
-                        for msg in chat_history.messages:
-                            role = getattr(msg, 'role', 'user')
-                            content = getattr(msg, 'content', '')
-                            messages.append({"role": role, "content": content})
+                    async def get_chat_message_contents(
+                        self, 
+                        chat_history: ChatHistory, 
+                        settings=None, 
+                        **kwargs
+                    ):
+                        """Execute chat completion using global connection pool."""
+                        # Build message payload
+                        messages = [
+                            {
+                                "role": getattr(msg, 'role', 'user'),
+                                "content": getattr(msg, 'content', '')
+                            }
+                            for msg in chat_history.messages
+                        ]
 
                         payload = {
                             "model": self._model_name,
-                            "messages": messages,  # 使用結構化消息格式
+                            "messages": messages,
                             "stream": False
                         }
 
-                        logger.debug(f"Calling Ollama Chat API: {self._base_url}/api/chat, model={self._model_name}")
+                        logger.debug(f"Calling Ollama: {self._base_url}/api/chat")
 
                         try:
-                            # 使用異步 HTTP 客戶端避免阻塞事件循環
-                            timeout = aiohttp.ClientTimeout(total=120)
-                            async with aiohttp.ClientSession(timeout=timeout) as session:
-                                async with session.post(
-                                    f"{self._base_url}/api/chat",
-                                    json=payload
-                                ) as resp:
-                                    resp.raise_for_status()
-                                    result = await resp.json()
+                            # Use global session for connection pooling
+                            session = await get_global_session()
+                            async with session.post(
+                                f"{self._base_url}/api/chat",
+                                json=payload
+                            ) as resp:
+                                resp.raise_for_status()
+                                result = await resp.json()
                             
-                            # 提取響應內容
                             output = result.get("message", {}).get("content", "")
-                            if not output:
-                                logger.warning(f"Empty response from Ollama chat API")
-                                output = ""
-                            
                             return [ChatMessageContent(role="assistant", content=output.strip())]
 
                         except Exception as e:
-                            logger.error(f"Ollama model execution failed: {e}")
+                            logger.error(f"Ollama execution failed: {e}")
                             raise
 
-                # ✅ 註冊自定義 Ollama connector
-                ollama_service = OllamaChatCompletion(base_url=base_url, model_name=model_name)
+                ollama_service = OllamaChatCompletion(
+                    base_url=ollama_base_url, 
+                    model_name=ollama_model
+                )
                 kernel.add_service(ollama_service)
                 
             else:

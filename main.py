@@ -86,6 +86,14 @@ async def lifespan(app: FastAPI):
     # 關閉
     logger.info("🛑 LyraLLM AI Gateway 正在關閉...")
     
+    # 關閉全局 aiohttp session
+    try:
+        from lyrallm.core.model_executor import close_global_session
+        await close_global_session()
+        logger.info("🔌 全局連線池已關閉")
+    except Exception as e:
+        logger.warning(f"⚠️ 全局連線池關閉失敗: {e}")
+    
     # 關閉模型管理器
     try:
         from lyrallm.core.model_manager import get_model_manager_sync
