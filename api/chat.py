@@ -35,6 +35,10 @@ from agents.agent_factory import AgentFactory
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+class ChatMessage(BaseModel):
+    role: str  # "system", "user", "assistant"
+    content: str
+
 def _convert_to_chat_history(messages: List[ChatMessage]) -> ChatHistory:
     """將 Pydantic ChatMessage 列表轉換為 Semantic Kernel ChatHistory"""
     history = ChatHistory()
@@ -78,14 +82,6 @@ class RequestLoggingMiddleware:
             except Exception as e:
                 self.logger.error(f"❌ 讀取請求內容失敗: {e}")
 request_logger = RequestLoggingMiddleware()
-
-class ChatMessage(BaseModel):
-    role: str  # "system", "user", "assistant"
-    content: str
-
-class ChatMessage(BaseModel):
-    role: str  # "system", "user", "assistant"
-    content: str
 
 # 簡化的 Features 模型 - 只處理已知參數
 class Features(BaseModel):

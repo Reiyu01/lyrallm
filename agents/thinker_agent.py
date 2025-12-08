@@ -808,44 +808,7 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
                 return "抱歉，我無法為您提供回應。"
             
             return response[0].content
-- 以清晰的結構呈現信息
-- 注明資訊的時效性和來源可靠性
 
-**如果資料來自企業知識庫：**
-- 直接引用相關的政策、規範或指引
-- 提供具體的內部流程或標準
-- 如果資料中包含具體的步驟，請詳細說明
-
-**通用要求：**
-- 以友好自然的語調回應
-- 提供具體實用的資訊
-- 基於搜尋到的實際資料給出準確的回答
-- 如果搜尋結果不夠完整，請如實說明
-
-重要：請確保回答內容來自於提供的搜尋資料，不要編造資訊。
-""")
-            
-            response = await safe_chat_completion(
-                self.chat_service,
-                chat_history,
-                smart_settings(
-                    self.chat_service, 
-                    max_completion_tokens=2000,
-                    temperature=0.7
-                )
-            )
-            
-            if not response or len(response) == 0:
-                raise ValueError("未能生成最終回答")
-            
-            final_answer = response[0].content
-            logger.info(f"✅ {self.name} 最終回答生成完成，長度: {len(final_answer)} 字元")
-            logger.info(f"📋 {self.name} 本次處理摘要:")
-            logger.info(f"   🔍 總搜尋輪數: {len(self.search_history)}")
-            logger.info(f"   📚 資料來源: {[record.get('type', 'UNKNOWN') for record in self.search_history]}")
-            logger.info(f"   💬 最終回答長度: {len(final_answer)} 字元")
-            
-            return final_answer
             
         except Exception as e:
             logger.error(f"❌ {self.name} 最終回答生成失敗: {e}")
