@@ -564,6 +564,64 @@ def get_queue_status():
         logger.error(f"Failed to get event bus status: {e}")
         return {"queue_length": -1, "subscribers": 0, "running": False}
 
+async def handle_agent_mode_request_stream(request: ChatCompletionRequest, security_ctx: RequestSecurityContext = None) -> AsyncGenerator[Dict[str, Any], None]:
+    """
+    Agent 模式請求處理 (串流版本)
+    """
+    request_id = f"agent_{uuid.uuid4().hex[:12]}"
+    
+    try:
+        logger.info(f"[{request_id}] 進入 Agent 模式請求 (串流)")
+
+        user_messages = [msg.content for msg in request.messages if msg.role == 'user']
+        if not user_messages:
+            raise ValueError("No user message found")
+        user_input = user_messages[-1]
+
+        # Resolve model name
+        model_name_to_use = request.model
+        try:
+            if request.model == 'auto':
+                from lyrallm.core.model_executor import ModelExecutor
+                executor = ModelExecutor()
+                routed_model, routing_info = await executor._route_model(request.messages, request_id)
+                model_name_to_use = routed_model or config_manager.get_default_model()
+                # Yield routing info
+                yield {
+                    "type": "info",
+                    "model": model_name_to_use,
+                    "routing_info": routing_info or {}
+                }
+        except Exception as route_err:
+            logger.warning(f"[{request_id}] Auto routing failed: {route_err}")
+
+        model_config = config_manager.get_model_by_name(model_name_to_use)
+        if not model_config:
+            raise ValueError(f"Model '{model_name_to_use}' not found")
+        
+        chat_service = await create_chat_service_for_model(model_name_to_use, model_config)
+        orchestrator = await create_practical_agent_orchestrator(chat_service)
+        
+        # Setup capabilities
+        if request.features:
+            if request.features.web_search: orchestrator.add_web_search_capability()
+            if request.features.rag_search: orchestrator.add_rag_capability()
+            
+        features_dict = {}
+        if request.features:
+            if request.features.web_search: features_dict["web_search"] = True
+            if request.features.rag_search: features_dict["rag_search"] = True
+            if request.features.image_generation: features_dict["image_generation"] = True
+            if request.features.code_interpreter: features_dict["code_interpreter"] = True
+
+        # Process stream
+        async for event in orchestrator.process_request_stream(user_input, features_dict, security_ctx=security_ctx):
+            yield event
+
+    except Exception as e:
+        logger.error(f"[{request_id}] Agent 串流處理失敗: {e}")
+        yield {"type": "error", "content": str(e)}
+
 async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx: RequestSecurityContext = None) -> ChatCompletionResponse:
     """
     流程追蹤 #004: Agent模式請求 - 初始化Agent協同器
@@ -844,78 +902,50 @@ async def create_chat_completion(
                 # 如前端要求串流，則 Agent 模式提供 SSE 串流支援
                 if request.stream:
                     async def agent_stream_generator():
-                        done_sent = False
-                        final_text = ""
                         try:
-                            # 首先嘗試獲取 Router 的隱式分配（默認 'auto' 模式）
-                            routed_model = None
-                            routing_info = None
-                            try:
-                                if request.model == 'auto':
-                                    from lyrallm.core.model_executor import ModelExecutor
-                                    _executor = ModelExecutor()
-                                    routed_model, routing_info = await _executor._route_model(request.messages, request_id)
-                                    logger.info(f"[{request_id}] Agent stream - routed to: {routed_model}")
-                                    # 設定前端路由資訊
-                                    info_payload = {
-                                        "type": "info",
-                                        "model": routed_model or request.model,
-                                        "routing_info": routing_info or {}
+                            async for event in handle_agent_mode_request_stream(request, security_ctx):
+                                if event.get("type") == "response_chunk" or event.get("type") == "delta":
+                                    # Standard delta format
+                                    payload = {
+                                        "type": "delta",
+                                        "model": request.model,
+                                        "text": event.get("content") or event.get("text")
                                     }
-                                    yield _format_sse(info_payload)
-
-                            except Exception as route_err:
-                                logger.warning(f"[{request_id}] Router early resolution failed: {route_err}")
-
-                            # 發送所有的 Agent 回應（彙總完整結果）
-                            response = await handle_agent_mode_request(request, security_ctx)
-                            if response and isinstance(response.choices, list) and response.choices:
-                                final_text = response.choices[0].message.content or ""
-
-                            # 逐步回傳分段結果，以模擬 streaming behavior
-                            chunk_size = 256
-                            for i in range(0, len(final_text), chunk_size):
-                                piece = final_text[i:i+chunk_size]
-                                payload = {
-                                    "type": "delta",
-                                    "model": response.model if response else request.model,
-                                    "text": piece,
-                                }
-                                yield _format_sse(payload)
-                                await asyncio.sleep(0)
-
-                            # 發送 final payload
-                            final_payload = {
-                                "type": "final",
-                                "model": response.model if response else request.model,
-                                "text": final_text,
-                                "usage": response.usage.model_dump() if (response and response.usage) else None,
-                            }
-                            yield _format_sse(final_payload)
+                                    yield _format_sse(payload)
+                                elif event.get("type") == "thought":
+                                    # Custom event for thoughts
+                                    payload = {
+                                        "type": "thought",
+                                        "content": event.get("content")
+                                    }
+                                    yield _format_sse(payload)
+                                elif event.get("type") == "tool_start":
+                                    payload = {
+                                        "type": "tool_start",
+                                        "tool": event.get("tool"),
+                                        "input": event.get("input")
+                                    }
+                                    yield _format_sse(payload)
+                                elif event.get("type") == "tool_end":
+                                    payload = {
+                                        "type": "tool_end",
+                                        "tool": event.get("tool"),
+                                        "output": event.get("output")
+                                    }
+                                    yield _format_sse(payload)
+                                elif event.get("type") == "error":
+                                    payload = {"error": event.get("content")}
+                                    yield _format_sse(payload)
+                                elif event.get("type") == "info":
+                                    yield _format_sse(event)
+                            
                             yield b"data: [DONE]\n\n"
-                            done_sent = True
-
-                            # 追蹤 token 使用 (背景化)
-                            try:
-                                asyncio.create_task(track_token_usage(
-                                    request_id=request_id,
-                                    model_name=response.model if response else request.model,
-                                    usage=response.usage if response else None,
-                                    start_time=start_time,
-                                    status="success",
-                                    user_id=security_ctx.user_id,
-                                    messages=request.messages,
-                                    response_text=final_text or ""
-                                ))
-                            except Exception as metric_error:
-                                logger.error(f"[{request_id}] Failed to record agent streaming token usage: {metric_error}")
-
+                            
                         except Exception as stream_err:
                             logger.error(f"[{request_id}] Agent streaming error: {stream_err}")
-                            err_payload = {"error": str(stream_err), "model": request.model}
+                            err_payload = {"error": str(stream_err)}
                             yield _format_sse(err_payload)
-                            if not done_sent:
-                                yield b"data: [DONE]\n\n"
+                            yield b"data: [DONE]\n\n"
 
                     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
                     return StreamingResponse(agent_stream_generator(), media_type="text/event-stream", headers=headers)

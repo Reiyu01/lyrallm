@@ -152,6 +152,45 @@ class PracticalAgentOrchestrator:
 3. 檢查問題是否過於複雜
 
 如果問題持續存在，請聯繫技術支援。"""
+
+    async def process_request_stream(self, user_input: str, features: Dict[str, Any] = None, security_ctx: Any = None):
+        """
+        處理用戶請求 (串流版本)
+        """
+        try:
+            logger.info(f"🎬 開始處理請求 (串流模式)")
+            
+            # 重置對話歷史
+            self.chat_history = ChatHistory()
+            
+            # 確保 Agent 可用
+            if features and features.get('web_search'):
+                if "web_search" not in self.available_capabilities:
+                    self.add_web_search_capability()
+            
+            # 記錄請求
+            self.conversation_log.append({
+                "type": "user_request", 
+                "content": user_input,
+                "features": features,
+                "mode": "thinker_agent_controller_stream"
+            })
+            
+            # 委託 ThinkerAgent 處理
+            async for event in self.thinker_agent.process_user_query_stream(
+                user_query=user_input,
+                search_agent=self.search_agent if (features and features.get('web_search')) else None,
+                rag_agent=self.rag_agent if self.rag_agent else None,
+                security_ctx=security_ctx,
+            ):
+                yield event
+            
+            logger.info(f"✅ 請求處理完成 (串流模式)")
+            
+        except Exception as e:
+            logger.error(f"❌ 處理請求失敗: {e}")
+            yield {"type": "error", "content": str(e)}
+
     
     async def _direct_response_fallback(self, user_input: str) -> str:
         """錯誤時的回退回應方法"""

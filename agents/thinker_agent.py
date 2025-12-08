@@ -1121,6 +1121,260 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
         except Exception as e:
             logger.error(f"❌ {self.name} 分析失敗: {e}")
             return f"分析失敗: {e}"
+
+    async def process_user_query_stream(self, user_query: str, search_agent=None, rag_agent=None, security_ctx: Any = None):
+        """
+        處理用戶查詢的主入口點 (串流版本)
+        Yields:
+            Dict[str, Any]: 事件物件
+        """
+        try:
+            yield {"type": "thought", "content": f"🧠 {self.name} 開始處理查詢..."}
+            
+            # 設置可用的代理
+            if search_agent:
+                self.search_agent = search_agent
+            if rag_agent:
+                self.rag_agent = rag_agent
+            
+            # 重置搜尋歷史
+            self.search_history = []
+            self.collected_info = {}
+            
+            # 解析前端身分
+            user_role = None
+            try:
+                if security_ctx:
+                    user_role = getattr(security_ctx, 'requested_role', None) or (getattr(security_ctx, 'role', None).name if getattr(security_ctx, 'role', None) else None)
+                    if isinstance(user_role, str):
+                        user_role = user_role
+            except Exception:
+                user_role = None
+
+            # 準備可用工具列表
+            available_tools = []
+            if self.search_agent:
+                available_tools.append("WebSearch")
+            if self.rag_agent:
+                available_tools.append("RAG")
+            
+            yield {"type": "thought", "content": f"🛠️ 可用工具: {available_tools}"}
+            
+            # 第一步：初始決策
+            if not available_tools:
+                yield {"type": "thought", "content": "📝 無可用工具，直接回答"}
+                async for chunk in self._provide_direct_answer_stream(user_query):
+                    yield chunk
+                return
+            
+            if self._has_explicit_tool_request(user_query):
+                yield {"type": "thought", "content": "🎯 檢測到明確工具請求，跳過初始決策"}
+                initial_decision = {'mode': 'AGENT_MODE', 'reason': '明確工具請求', 'confidence': 10}
+            else:
+                yield {"type": "thought", "content": "🤔 正在進行初始決策..."}
+                initial_decision = await self._make_initial_decision(user_query, available_tools)
+            
+            yield {"type": "decision", "content": initial_decision}
+            
+            if initial_decision['mode'] == 'DIRECT_ANSWER':
+                yield {"type": "thought", "content": "🤔 決定直接回答"}
+                async for chunk in self._provide_direct_answer_stream(user_query):
+                    yield chunk
+                return
+            
+            # 第二步：分析和制定策略
+            yield {"type": "thought", "content": "📊 正在分析需求並制定策略..."}
+            strategy = await self._analyze_and_plan(user_query, available_tools)
+            yield {"type": "plan", "content": strategy}
+            
+            if strategy['approach'] == 'DIRECT_ANSWER':
+                yield {"type": "thought", "content": "💡 無需搜尋，提供直接回答"}
+                async for chunk in self._provide_direct_answer_stream(user_query):
+                    yield chunk
+                return
+            else:
+                yield {"type": "thought", "content": "🔍 啟動多輪搜尋流程"}
+                async for event in self._multi_round_search_process_stream(user_query, strategy, user_role=user_role):
+                    yield event
+            
+        except Exception as e:
+            logger.error(f"❌ {self.name} 處理查詢失敗: {e}")
+            yield {"type": "error", "content": str(e)}
+            # Fallback
+            async for chunk in self._provide_direct_answer_stream(user_query):
+                yield chunk
+
+    async def _provide_direct_answer_stream(self, user_query: str):
+        """提供直接回答（串流版本）"""
+        try:
+            chat_history = ChatHistory()
+            chat_history.add_user_message(f"""
+你是一個知識豐富、友善的助理。請直接回答用戶的問題：
+
+{user_query}
+
+**回答指導：**
+- 以自然、友好的語調回應
+- 提供準確且實用的資訊
+- 如果問題涉及即時資訊（如今天的新聞、股價等），請說明你的知識有時間限制
+- 給出具體、可行的建議
+- 保持回答簡潔而完整
+- 請使用繁體中文
+請直接回答，不需要說明你的思考過程。
+""")
+            
+            async for chunk in self.chat_service.get_streaming_chat_message_contents(
+                chat_history=chat_history,
+                settings=smart_settings(
+                    self.chat_service, 
+                    max_completion_tokens=2000,
+                    temperature=0.7
+                )
+            ):
+                if chunk and len(chunk) > 0:
+                    yield {"type": "response_chunk", "content": chunk[0].content}
+            
+        except Exception as e:
+            logger.error(f"❌ {self.name} 直接回答失敗: {e}")
+            yield {"type": "error", "content": f"抱歉，處理您的請求時發生錯誤：{str(e)}"}
+
+    async def _multi_round_search_process_stream(self, user_query: str, strategy: Dict[str, Any], user_role: Optional[str] = None):
+        """智能多輪搜尋流程 (串流版本)"""
+        try:
+            max_rounds = 5
+            search_tasks = strategy.get('tasks', [user_query])
+            search_types = strategy.get('search_types', [])
+            
+            while len(search_types) < len(search_tasks):
+                default_type = 'RAG' if self.rag_agent else 'WEB'
+                search_types.append(default_type)
+            
+            task_index = 0
+            while task_index < len(search_tasks) and task_index < max_rounds:
+                current_task = search_tasks[task_index]
+                current_type = search_types[task_index]
+                
+                yield {"type": "thought", "content": f"🔍 第 {task_index + 1} 輪搜尋 ({current_type}): {current_task}"}
+                
+                # Yield tool start event
+                yield {
+                    "type": "tool_start",
+                    "tool": current_type,
+                    "input": current_task
+                }
+                
+                # Execute search (still blocking for the search itself, but that's fine)
+                search_result = await self._execute_search_with_validation(current_task, current_type, user_role=user_role)
+                
+                # Yield tool end event
+                yield {
+                    "type": "tool_end",
+                    "tool": current_type,
+                    "output": str(search_result.get('success', False)) # Or summary
+                }
+                
+                self.search_history.append({
+                    'round': task_index + 1,
+                    'query': current_task,
+                    'type': current_type,
+                    'result': search_result,
+                    'success': search_result.get('success', True)
+                })
+                
+                should_continue, next_search = await self._smart_continuation_decision(user_query, task_index + 1, len(search_tasks))
+                
+                if not should_continue:
+                    yield {"type": "thought", "content": "🎯 資料已充足，停止搜尋"}
+                    break
+                
+                if next_search and next_search.get('query') and next_search.get('type'):
+                    new_query = next_search['query']
+                    new_type = next_search['type']
+                    if new_type not in [st for st in search_types[:task_index+1]]:
+                        search_tasks.append(new_query)
+                        search_types.append(new_type)
+                        yield {"type": "thought", "content": f"🎯 動態添加新搜尋任務 ({new_type}): {new_query}"}
+                
+                task_index += 1
+            
+            if not self._has_sufficient_data():
+                yield {"type": "thought", "content": "⚠️ 資料可能不足，但已達搜尋限制"}
+            
+            yield {"type": "thought", "content": "🔄 生成最終回答..."}
+            async for chunk in self._generate_final_answer_stream(user_query):
+                yield chunk
+                
+        except Exception as e:
+            logger.error(f"❌ {self.name} 多輪搜尋失敗: {e}")
+            yield {"type": "error", "content": str(e)}
+
+    async def _generate_final_answer_stream(self, user_query: str):
+        """生成最終整合回答 (串流版本)"""
+        try:
+            all_data = []
+            total_length = 0
+            max_context_length = 8000
+            
+            for i, search_record in enumerate(self.search_history):
+                search_type = search_record.get('type', 'UNKNOWN')
+                result_data = search_record.get('result', {})
+                extracted_content = self._extract_search_content(result_data)
+                data_chunk = f"搜尋 {i+1} ({search_type}): {search_record['query']}\n內容: {extracted_content}\n"
+                
+                if total_length + len(data_chunk) > max_context_length:
+                    break
+                all_data.append(data_chunk)
+                total_length += len(data_chunk)
+            
+            all_search_data = "\n".join(all_data)
+            
+            if not all_search_data.strip():
+                async for chunk in self._provide_direct_answer_stream(user_query):
+                    yield chunk
+                return
+            
+            chat_history = ChatHistory()
+            chat_history.add_user_message(f"""
+你是一個專業的助理，根據搜集到的資料直接回答用戶問題。
+
+用戶問題: {user_query}
+
+搜尋到的相關資料:
+{all_search_data}
+
+請根據上述資料回答用戶的問題：
+
+**如果資料來自網路搜尋：**
+- 整理和總結搜尋到的最新資訊
+- 標註資訊來源（如果有的話）
+- 保持客觀和準確
+
+**如果資料來自內部知識庫(RAG)：**
+- 準確引用文檔內容
+- 回答需符合內部規範
+
+**回答格式：**
+- 結構清晰，使用 Markdown 格式
+- 重點突出
+- 如果資料不足以回答某部分，請誠實說明
+
+請直接回答，不需要說明你的思考過程。
+""")
+            
+            async for chunk in self.chat_service.get_streaming_chat_message_contents(
+                chat_history=chat_history,
+                settings=smart_settings(
+                    self.chat_service, 
+                    max_completion_tokens=4000,
+                    temperature=0.5
+                )
+            ):
+                if chunk and len(chunk) > 0:
+                    yield {"type": "response_chunk", "content": chunk[0].content}
+                    
+        except Exception as e:
+            logger.error(f"❌ {self.name} 生成最終回答失敗: {e}")
+            yield {"type": "error", "content": str(e)}
     
     def get_agent(self) -> ChatCompletionAgent:
         """獲取底層的 ChatCompletionAgent"""
