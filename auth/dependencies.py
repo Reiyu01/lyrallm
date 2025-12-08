@@ -53,6 +53,30 @@ async def get_request_security_context(
     registry: RoleRegistry = Depends(get_role_registry),
 ) -> RequestSecurityContext:
     """Resolve the caller's security context based on configured RBAC."""
+    
+    # 快速通道：當權限系統關閉時，返回無限制角色
+    auth_config = config_manager.config.get("auth", {})
+    auth_enabled = auth_config.get("enabled", True)
+    if not auth_enabled:
+        logger.debug("Auth system disabled - granting unrestricted access")
+        unrestricted_role = RoleDefinition(
+            name="unrestricted",
+            description="Unrestricted access (auth disabled)",
+            permissions=frozenset(["*"]),
+            feature_flags=frozenset(["*"]),
+            routing_policies={"allow_external_providers": True},
+            allowed_models=None  # None = 允許所有模型
+        )
+        return RequestSecurityContext(
+            role=unrestricted_role,
+            permissions=frozenset(["*"]),
+            feature_flags=frozenset(["*"]),
+            routing_policies={"allow_external_providers": True},
+            allowed_models=None,
+            requested_role="unrestricted",
+            user_id=user_header,
+        )
+    
     requested_role = (role_header or "").strip() or None
     user_id = (user_header or "").strip() or None
 

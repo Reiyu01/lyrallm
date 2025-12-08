@@ -135,6 +135,11 @@ models:
 
 
 auth:
+  # 權限系統全局開關
+  # - true: 啟用完整 RBAC 權限控制（生產環境建議）
+  # - false: 跳過所有權限檢查（效能測試、開發環境）
+  enabled: false
+  
   default_role: "standard_user"
 
   roles:

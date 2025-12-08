@@ -29,6 +29,14 @@ class RoleDefinition:
         return "*" in self.feature_flags or feature in self.feature_flags
 
     def allows_model(self, model_name: str) -> bool:
+        """Check if the role allows access to the specified model.
+        
+        Returns:
+            True if model is allowed or if allowed_models is None (unrestricted).
+        """
+        # None = 允許所有模型（無限制模式）
+        if self.allowed_models is None:
+            return True
         if not self.allowed_models:
             return True
         if "*" in self.allowed_models:

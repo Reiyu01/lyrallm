@@ -545,23 +545,24 @@ class ModelExecutor:
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", url, headers=headers, params=params, json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    data_str = line[6:] if line.startswith("data:") else line
-                    data_str = data_str.strip()
-                    if not data_str:
-                        continue
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    yield event
+        session = await get_global_session()
+        async with session.post(url, headers=headers, params=params, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.content:
+                line = line.decode('utf-8').strip()
+                if not line:
+                    continue
+                data_str = line[6:] if line.startswith("data:") else line
+                data_str = data_str.strip()
+                if not data_str:
+                    continue
+                if data_str == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                yield event
 
     async def _stream_openai(
         self,
@@ -597,23 +598,24 @@ class ModelExecutor:
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    data_str = line[6:] if line.startswith("data:") else line
-                    data_str = data_str.strip()
-                    if not data_str:
-                        continue
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    yield event
+        session = await get_global_session()
+        async with session.post(url, headers=headers, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.content:
+                line = line.decode('utf-8').strip()
+                if not line:
+                    continue
+                data_str = line[6:] if line.startswith("data:") else line
+                data_str = data_str.strip()
+                if not data_str:
+                    continue
+                if data_str == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                yield event
 
     async def _stream_ollama(
         self,
@@ -640,32 +642,32 @@ class ModelExecutor:
         if max_tokens:
             payload["options"]["num_predict"] = max_tokens
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", url, json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    data_str = line.strip()
-                    if not data_str:
-                        continue
-                    try:
-                        event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
+        session = await get_global_session()
+        async with session.post(url, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.content:
+                if not line:
+                    continue
+                data_str = line.decode('utf-8').strip()
+                if not data_str:
+                    continue
+                try:
+                    event = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
 
-                    if "message" in event and isinstance(event["message"], dict):
-                        content = event["message"].get("content")
-                        if isinstance(content, str) and content:
-                            yield {
-                                "choices": [
-                                    {
-                                        "delta": {"content": content},
-                                    }
-                                ],
-                            }
-                    if event.get("done"):
-                        break
+                if "message" in event and isinstance(event["message"], dict):
+                    content = event["message"].get("content")
+                    if isinstance(content, str) and content:
+                        yield {
+                            "choices": [
+                                {
+                                    "delta": {"content": content},
+                                }
+                            ],
+                        }
+                if event.get("done"):
+                    break
 
     async def stream_generate(
         self,

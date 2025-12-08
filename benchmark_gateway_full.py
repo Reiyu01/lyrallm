@@ -690,6 +690,7 @@ def main():
     print("="*80)
     print(f"測試模型: {args.model}")
     print(f"測試類型: {args.tests}")
+    print("\n💡 提示：如需關閉權限檢查，請修改 config.yaml: auth.enabled = false\n")
     
     benchmark = GatewayBenchmark(model=args.model)
     all_results = {}
