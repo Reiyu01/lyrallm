@@ -30,10 +30,25 @@ from semantic_kernel.connectors.ai.open_ai import OpenAIChatPromptExecutionSetti
 
 # Multi-Agent System imports
 
-from agents.practical_agent_orchestrator import create_practical_agent_orchestrator
+from agents.agent_factory import AgentFactory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+def _convert_to_chat_history(messages: List[ChatMessage]) -> ChatHistory:
+    """將 Pydantic ChatMessage 列表轉換為 Semantic Kernel ChatHistory"""
+    history = ChatHistory()
+    for msg in messages:
+        if msg.role == "user":
+            history.add_user_message(msg.content)
+        elif msg.role == "assistant":
+            history.add_assistant_message(msg.content)
+        elif msg.role == "system":
+            history.add_system_message(msg.content)
+        else:
+            # Fallback for other roles
+            history.add_message(ChatMessageContent(role=msg.role, content=msg.content))
+    return history
 
 # 新增請求日誌功能
 class RequestLoggingMiddleware:
@@ -573,10 +588,10 @@ async def handle_agent_mode_request_stream(request: ChatCompletionRequest, secur
     try:
         logger.info(f"[{request_id}] 進入 Agent 模式請求 (串流)")
 
-        user_messages = [msg.content for msg in request.messages if msg.role == 'user']
-        if not user_messages:
-            raise ValueError("No user message found")
-        user_input = user_messages[-1]
+        # 轉換對話歷史 (使用完整 Context)
+        chat_history = _convert_to_chat_history(request.messages)
+        if not chat_history.messages:
+             raise ValueError("No messages found")
 
         # Resolve model name
         model_name_to_use = request.model
@@ -600,22 +615,17 @@ async def handle_agent_mode_request_stream(request: ChatCompletionRequest, secur
             raise ValueError(f"Model '{model_name_to_use}' not found")
         
         chat_service = await create_chat_service_for_model(model_name_to_use, model_config)
-        orchestrator = await create_practical_agent_orchestrator(chat_service)
         
-        # Setup capabilities
-        if request.features:
-            if request.features.web_search: orchestrator.add_web_search_capability()
-            if request.features.rag_search: orchestrator.add_rag_capability()
-            
+        # 準備 features 字典
         features_dict = {}
         if request.features:
-            if request.features.web_search: features_dict["web_search"] = True
-            if request.features.rag_search: features_dict["rag_search"] = True
-            if request.features.image_generation: features_dict["image_generation"] = True
-            if request.features.code_interpreter: features_dict["code_interpreter"] = True
-
-        # Process stream
-        async for event in orchestrator.process_request_stream(user_input, features_dict, security_ctx=security_ctx):
+            features_dict = request.features.model_dump(exclude_none=True)
+            
+        # 使用 Factory 創建 ThinkerAgent (取代 Orchestrator)
+        thinker_agent = AgentFactory.create_thinker_agent(chat_service, features=features_dict, name="ThinkerAgent")
+        
+        # Process stream (直接調用 ThinkerAgent)
+        async for event in thinker_agent.process_stream(chat_history, security_ctx=security_ctx):
             yield event
 
     except Exception as e:
@@ -632,12 +642,10 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
     try:
         logger.info(f"[{request_id}] 進入 Agent 模式請求")
 
-        # 獲取用戶最新消息
-
-        user_messages = [msg.content for msg in request.messages if msg.role == 'user']
-        if not user_messages:
-            raise ValueError("No user message found")
-        user_input = user_messages[-1]
+        # 轉換對話歷史
+        chat_history = _convert_to_chat_history(request.messages)
+        if not chat_history.messages:
+             raise ValueError("No messages found")
 
         # Resolve model name (handle 'auto' routing) and 構建代理協同器
         model_name_to_use = request.model
@@ -658,64 +666,20 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
             raise ValueError(f"Model '{model_name_to_use}' not found")
         chat_service = await create_chat_service_for_model(model_name_to_use, model_config)
 
-        # 流程追蹤 #005: 構建Agent協同器
-        # 構建 Agent 協同器 (使用使用者選擇的模型)
-
-        orchestrator = await create_practical_agent_orchestrator(chat_service)
-        if not orchestrator:
-            raise ValueError("無法初始化 Agent 協同器")
-
-        # 流程追蹤 #006: 構建能力描述 - 根據features描述相應能力
-        # 根據 features 構建新增能力
-
-        capabilities_added = []
-        if request.features:
-            if request.features.web_search:
-                if orchestrator.add_web_search_capability():
-                    capabilities_added.append("web_search")
-            if request.features.rag_search:
-                if orchestrator.add_rag_capability():
-                    capabilities_added.append("rag_search")
-            if request.features.image_generation:
-
-                # TODO: 添加圖像生成能力
-
-                logger.info(f"[{request_id}] Image generation 能力尚未實現")
-                pass
-            if request.features.code_interpreter:
-
-                # TODO: 添加代碼解釋器能力
-
-                logger.info(f"[{request_id}] Code interpreter 能力尚未實現")
-                pass
-        logger.info(f"[{request_id}] Agent 模式可用功能: {capabilities_added}")
-
-        # 獲取 features 字典
-
+        # 流程追蹤 #005: 構建Agent協同器 (使用 Factory)
         features_dict = {}
         if request.features:
-
-            # 直接查詢具體的功能開啟
-
-            if request.features.web_search:
-                features_dict["web_search"] = True
-            if request.features.rag_search:
-                features_dict["rag_search"] = True
-            if request.features.image_generation:
-                features_dict["image_generation"] = True
-            if request.features.code_interpreter:
-                features_dict["code_interpreter"] = True
-            logger.info(f"[{request_id}] Agent 模式可用功能: {list(features_dict.keys())}")
+            features_dict = request.features.model_dump(exclude_none=True)
+            
+        thinker_agent = AgentFactory.create_thinker_agent(chat_service, features=features_dict, name="ThinkerAgent")
 
         # 流程追蹤 #007: 構建用戶請求 - 使用Agent協同器
         # 構建請求
 
         try:
             # Protect agent processing from hanging by imposing a timeout.
-            # If the orchestrator (or its agents) blocks (e.g., external MCP not available),
-            # we timeout and allow the caller to fall back to standard model execution.
             result = await asyncio.wait_for(
-                orchestrator.process_request(user_input, features_dict, security_ctx=security_ctx),
+                thinker_agent.process(chat_history, security_ctx=security_ctx),
                 timeout=120.0,
             )
         except asyncio.TimeoutError:
@@ -747,15 +711,11 @@ async def handle_agent_mode_request(request: ChatCompletionRequest, security_ctx
             usage=usage
         )
 
-        # 記錄對話歷史（使用者選擇的模型）
-
-        conversation_history = orchestrator.get_conversation_history()
-        if conversation_history:
-            logger.info(f"[{request_id}] Agent 選擇的模型: {len(conversation_history)} 會話")
         logger.info(f"[{request_id}] Agent 模式執行完成")
         return response
     except Exception as e:
         logger.error(f"[{request_id}] Agent 模式執行失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
         import traceback
 
         logger.error(f"[{request_id}] 錯誤追蹤: {traceback.format_exc()}")

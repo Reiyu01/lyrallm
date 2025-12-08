@@ -4,13 +4,12 @@ Agent 模組 - 提供多 Agent 協作功能
 重構版本：包含獨立的 Thinker Agent 和 Search Agent
 """
 
-from .practical_agent_orchestrator import PracticalAgentOrchestrator, create_practical_agent_orchestrator
+from .agent_factory import AgentFactory
 from .thinker_agent import ThinkerAgent
 from .search_agent import SearchAgent
 
 __all__ = [
-    "PracticalAgentOrchestrator",
-    "create_practical_agent_orchestrator",
+    "AgentFactory",
     "ThinkerAgent",
     "SearchAgent"
 ]

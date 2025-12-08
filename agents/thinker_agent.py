@@ -157,34 +157,36 @@ class ThinkerAgent:
         self.rag_agent = rag_agent
         logger.info(f"🔗 {self.name} 已連接到 RAGAgent")
     
-    async def process_user_query(self, user_query: str, search_agent=None, rag_agent=None, security_ctx: Any = None) -> str:
+    async def process(self, chat_history: ChatHistory, security_ctx: Any = None) -> str:
         """
-        處理用戶查詢的主入口點
+        處理用戶查詢的主入口點 (同步等待版)
         
         Args:
-            user_query: 用戶查詢內容
-            search_agent: 網路搜尋代理（可選）
-            rag_agent: RAG 代理（可選）
+            chat_history: 完整對話歷史 (Semantic Kernel ChatHistory)
+            security_ctx: 安全上下文 (RBAC)
             
         Returns:
             str: 最終回應
         """
+        # 提取當前用戶查詢 (最後一條 User Message)
+        user_query = ""
+        if chat_history.messages:
+            for msg in reversed(chat_history.messages):
+                if msg.role == "user":
+                    user_query = msg.content
+                    break
+        
+        if not user_query:
+            return "無法識別用戶輸入"
+
         try:
             logger.info(f"🧠 {self.name} 開始處理查詢: {user_query[:50]}...")
             
-            # 設置可用的代理
-            if search_agent:
-                self.search_agent = search_agent
-                logger.info(f"🔍 {self.name} WebSearch 代理已設定")
-            if rag_agent:
-                self.rag_agent = rag_agent
-                logger.info(f"📚 {self.name} RAG 代理已設定")
-            
-            # 重置搜尋歷史
+            # 重置搜尋歷史 (Per-Request State)
             self.search_history = []
             self.collected_info = {}
             
-            # 解析前端身分（若有），以便下游搜尋能夠進行 RBAC 過濾
+            # 解析前端身分
             user_role = None
             try:
                 if security_ctx:
@@ -203,13 +205,11 @@ class ThinkerAgent:
             
             logger.info(f"🛠️ {self.name} 可用工具: {available_tools}")
             
-            # 第一步：初始決策 - 是否需要 Agent 模式（僅當沒有明確工具需求時）
+            # 第一步：初始決策
             if not available_tools:
-                # 沒有任何工具可用，直接回答
                 logger.info(f"📝 {self.name} 無可用工具，直接回答")
-                return await self._provide_direct_answer(user_query)
+                return await self._provide_direct_answer(chat_history)
             
-            # 如果用戶明確提到 RAG、搜尋等關鍵詞，跳過初始決策
             if self._has_explicit_tool_request(user_query):
                 logger.info(f"🎯 {self.name} 檢測到明確工具請求，跳過初始決策")
                 initial_decision = {'mode': 'AGENT_MODE', 'reason': '明確工具請求', 'confidence': 10}
@@ -218,19 +218,18 @@ class ThinkerAgent:
             
             if initial_decision['mode'] == 'DIRECT_ANSWER':
                 logger.info(f"🤔 {self.name} 決定直接回答，不使用特殊工具")
-                return await self._provide_direct_answer(user_query)
+                return await self._provide_direct_answer(chat_history)
             
             # 第二步：分析和制定策略
+            # TODO: 未來 _analyze_and_plan 也應該參考 chat_history 以支援多輪對話的指代消解
             strategy = await self._analyze_and_plan(user_query, available_tools)
             
             if strategy['approach'] == 'DIRECT_ANSWER':
-                # 不需要搜尋
                 logger.info("💡 無需搜尋，提供直接回答")
-                return await self._provide_direct_answer(user_query)
+                return await self._provide_direct_answer(chat_history)
             else:
-                # 需要搜尋
                 logger.info("🔍 啟動多輪搜尋流程")
-                return await self._multi_round_search_process(user_query, strategy, user_role=user_role)
+                return await self._multi_round_search_process(user_query, strategy, user_role=user_role, chat_history=chat_history)
             
         except Exception as e:
             logger.error(f"❌ {self.name} 處理查詢失敗: {e}")
@@ -415,7 +414,7 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
             logger.error(f"❌ {self.name} 策略分析失敗: {e}")
             return {'approach': 'DIRECT_ANSWER', 'tasks': [], 'priority': 'LOW'}
     
-    async def _multi_round_search_process(self, user_query: str, strategy: Dict[str, Any], user_role: Optional[str] = None) -> str:
+    async def _multi_round_search_process(self, user_query: str, strategy: Dict[str, Any], user_role: Optional[str] = None, chat_history: ChatHistory = None) -> str:
         """智能多輪搜尋流程 - 讓Agent自主決定何時停止"""
         try:
             max_rounds = 5  # 最多搜尋輪數
@@ -478,7 +477,7 @@ APPROACH: [DIRECT_ANSWER 或 NEED_SEARCH]
                 logger.warning(f"⚠️ {self.name} 資料可能不足，但已達搜尋限制，將基於現有資料回答")
             
             # 整合所有資訊並生成最終回答
-            return await self._generate_final_answer(user_query)
+            return await self._generate_final_answer(user_query, chat_history=chat_history)
             
         except Exception as e:
             logger.error(f"❌ {self.name} 多輪搜尋失敗: {e}")
@@ -746,11 +745,16 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
         logger.info(f"📊 {self.name} 有 {len(successful_searches)} 個成功的搜尋結果")
         return True
     
-    async def _generate_final_answer(self, user_query: str) -> str:
+    async def _generate_final_answer(self, user_query: str, chat_history: ChatHistory = None) -> str:
         """生成最終整合回答"""
         try:
             logger.info(f"🔄 {self.name} 開始生成最終回答...")
             logger.info(f"📚 {self.name} 總共收集了 {len(self.search_history)} 輪搜尋結果")
+            
+            # 確保有 chat_history
+            if chat_history is None:
+                chat_history = ChatHistory()
+                chat_history.add_user_message(user_query)
             
             # 整理所有搜尋資料（優化 RAG 結果處理）
             all_data = []
@@ -783,22 +787,27 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             # 如果沒有搜尋資料，直接使用基礎回答
             if not all_search_data.strip():
                 logger.warning(f"⚠️ {self.name} 沒有有效的搜尋資料，使用直接回答")
-                return await self._provide_direct_answer(user_query)
+                return await self._provide_direct_answer(chat_history)
             
-            chat_history = ChatHistory()
-            chat_history.add_user_message(f"""
-你是一個專業的助理，根據搜集到的資料直接回答用戶問題。
-
-用戶問題: {user_query}
-
-搜尋到的相關資料:
-{all_search_data}
-
-請根據上述資料回答用戶的問題：
-
-**如果資料來自網路搜尋：**
-- 整理和總結搜尋到的最新資訊
-- 提供具體的新聞、數據或事實
+            # 注入搜尋資料到 Context
+            from semantic_kernel.contents.chat_message_content import ChatMessageContent
+            chat_history.messages.append(ChatMessageContent(role="system", content=f"搜尋到的相關資料:\n{all_search_data}"))
+            chat_history.messages.append(ChatMessageContent(role="system", content="請根據上述資料回答用戶的問題。回答應結構清晰，並標註資訊來源。"))
+            
+            response = await safe_chat_completion(
+                self.chat_service,
+                chat_history,
+                smart_settings(
+                    self.chat_service, 
+                    max_completion_tokens=4000,
+                    temperature=0.5
+                )
+            )
+            
+            if not response or len(response) == 0:
+                return "抱歉，我無法為您提供回應。"
+            
+            return response[0].content
 - 以清晰的結構呈現信息
 - 注明資訊的時效性和來源可靠性
 
@@ -935,24 +944,14 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
                 result_str = result_str[:500] + "...[提取失敗]"
             return result_str
 
-    async def _provide_direct_answer(self, user_query: str) -> str:
+    async def _provide_direct_answer(self, chat_history: ChatHistory) -> str:
         """提供直接回答（無需搜尋）"""
         try:
-            chat_history = ChatHistory()
-            chat_history.add_user_message(f"""
-你是一個知識豐富、友善的助理。請直接回答用戶的問題：
-
-{user_query}
-
-**回答指導：**
-- 以自然、友好的語調回應
-- 提供準確且實用的資訊
-- 如果問題涉及即時資訊（如今天的新聞、股價等），請說明你的知識有時間限制
-- 給出具體、可行的建議
-- 保持回答簡潔而完整
-- 請使用繁體中文
-請直接回答，不需要說明你的思考過程。
-""")
+            # 確保有 System Prompt
+            from semantic_kernel.contents.chat_message_content import ChatMessageContent
+            has_system = any(msg.role == "system" for msg in chat_history.messages)
+            if not has_system:
+                chat_history.messages.insert(0, ChatMessageContent(role="system", content="你是一個知識豐富、友善的助理。請使用繁體中文直接回答用戶的問題。"))
             
             response = await safe_chat_completion(
                 self.chat_service,
@@ -1122,20 +1121,26 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             logger.error(f"❌ {self.name} 分析失敗: {e}")
             return f"分析失敗: {e}"
 
-    async def process_user_query_stream(self, user_query: str, search_agent=None, rag_agent=None, security_ctx: Any = None):
+    async def process_stream(self, chat_history: ChatHistory, security_ctx: Any = None):
         """
         處理用戶查詢的主入口點 (串流版本)
         Yields:
             Dict[str, Any]: 事件物件
         """
+        # 提取當前用戶查詢
+        user_query = ""
+        if chat_history.messages:
+            for msg in reversed(chat_history.messages):
+                if msg.role == "user":
+                    user_query = msg.content
+                    break
+        
+        if not user_query:
+            yield {"type": "error", "content": "無法識別用戶輸入"}
+            return
+
         try:
             yield {"type": "thought", "content": f"🧠 {self.name} 開始處理查詢..."}
-            
-            # 設置可用的代理
-            if search_agent:
-                self.search_agent = search_agent
-            if rag_agent:
-                self.rag_agent = rag_agent
             
             # 重置搜尋歷史
             self.search_history = []
@@ -1163,7 +1168,7 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             # 第一步：初始決策
             if not available_tools:
                 yield {"type": "thought", "content": "📝 無可用工具，直接回答"}
-                async for chunk in self._provide_direct_answer_stream(user_query):
+                async for chunk in self._provide_direct_answer_stream(chat_history):
                     yield chunk
                 return
             
@@ -1178,7 +1183,7 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             
             if initial_decision['mode'] == 'DIRECT_ANSWER':
                 yield {"type": "thought", "content": "🤔 決定直接回答"}
-                async for chunk in self._provide_direct_answer_stream(user_query):
+                async for chunk in self._provide_direct_answer_stream(chat_history):
                     yield chunk
                 return
             
@@ -1189,39 +1194,28 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             
             if strategy['approach'] == 'DIRECT_ANSWER':
                 yield {"type": "thought", "content": "💡 無需搜尋，提供直接回答"}
-                async for chunk in self._provide_direct_answer_stream(user_query):
+                async for chunk in self._provide_direct_answer_stream(chat_history):
                     yield chunk
                 return
             else:
                 yield {"type": "thought", "content": "🔍 啟動多輪搜尋流程"}
-                async for event in self._multi_round_search_process_stream(user_query, strategy, user_role=user_role):
+                async for event in self._multi_round_search_process_stream(user_query, strategy, user_role=user_role, chat_history=chat_history):
                     yield event
             
         except Exception as e:
             logger.error(f"❌ {self.name} 處理查詢失敗: {e}")
             yield {"type": "error", "content": str(e)}
             # Fallback
-            async for chunk in self._provide_direct_answer_stream(user_query):
+            async for chunk in self._provide_direct_answer_stream(chat_history):
                 yield chunk
 
-    async def _provide_direct_answer_stream(self, user_query: str):
+    async def _provide_direct_answer_stream(self, chat_history: ChatHistory):
         """提供直接回答（串流版本）"""
         try:
-            chat_history = ChatHistory()
-            chat_history.add_user_message(f"""
-你是一個知識豐富、友善的助理。請直接回答用戶的問題：
-
-{user_query}
-
-**回答指導：**
-- 以自然、友好的語調回應
-- 提供準確且實用的資訊
-- 如果問題涉及即時資訊（如今天的新聞、股價等），請說明你的知識有時間限制
-- 給出具體、可行的建議
-- 保持回答簡潔而完整
-- 請使用繁體中文
-請直接回答，不需要說明你的思考過程。
-""")
+            from semantic_kernel.contents.chat_message_content import ChatMessageContent
+            has_system = any(msg.role == "system" for msg in chat_history.messages)
+            if not has_system:
+                chat_history.messages.insert(0, ChatMessageContent(role="system", content="你是一個知識豐富、友善的助理。請使用繁體中文直接回答用戶的問題。"))
             
             async for chunk in self.chat_service.get_streaming_chat_message_contents(
                 chat_history=chat_history,
@@ -1238,7 +1232,7 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             logger.error(f"❌ {self.name} 直接回答失敗: {e}")
             yield {"type": "error", "content": f"抱歉，處理您的請求時發生錯誤：{str(e)}"}
 
-    async def _multi_round_search_process_stream(self, user_query: str, strategy: Dict[str, Any], user_role: Optional[str] = None):
+    async def _multi_round_search_process_stream(self, user_query: str, strategy: Dict[str, Any], user_role: Optional[str] = None, chat_history: ChatHistory = None):
         """智能多輪搜尋流程 (串流版本)"""
         try:
             max_rounds = 5
@@ -1301,16 +1295,21 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
                 yield {"type": "thought", "content": "⚠️ 資料可能不足，但已達搜尋限制"}
             
             yield {"type": "thought", "content": "🔄 生成最終回答..."}
-            async for chunk in self._generate_final_answer_stream(user_query):
+            async for chunk in self._generate_final_answer_stream(user_query, chat_history=chat_history):
                 yield chunk
                 
         except Exception as e:
             logger.error(f"❌ {self.name} 多輪搜尋失敗: {e}")
             yield {"type": "error", "content": str(e)}
 
-    async def _generate_final_answer_stream(self, user_query: str):
+    async def _generate_final_answer_stream(self, user_query: str, chat_history: ChatHistory = None):
         """生成最終整合回答 (串流版本)"""
         try:
+            # 確保有 chat_history
+            if chat_history is None:
+                chat_history = ChatHistory()
+                chat_history.add_user_message(user_query)
+
             all_data = []
             total_length = 0
             max_context_length = 8000
@@ -1329,37 +1328,14 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             all_search_data = "\n".join(all_data)
             
             if not all_search_data.strip():
-                async for chunk in self._provide_direct_answer_stream(user_query):
+                async for chunk in self._provide_direct_answer_stream(chat_history):
                     yield chunk
                 return
             
-            chat_history = ChatHistory()
-            chat_history.add_user_message(f"""
-你是一個專業的助理，根據搜集到的資料直接回答用戶問題。
-
-用戶問題: {user_query}
-
-搜尋到的相關資料:
-{all_search_data}
-
-請根據上述資料回答用戶的問題：
-
-**如果資料來自網路搜尋：**
-- 整理和總結搜尋到的最新資訊
-- 標註資訊來源（如果有的話）
-- 保持客觀和準確
-
-**如果資料來自內部知識庫(RAG)：**
-- 準確引用文檔內容
-- 回答需符合內部規範
-
-**回答格式：**
-- 結構清晰，使用 Markdown 格式
-- 重點突出
-- 如果資料不足以回答某部分，請誠實說明
-
-請直接回答，不需要說明你的思考過程。
-""")
+            # 注入搜尋資料到 Context
+            from semantic_kernel.contents.chat_message_content import ChatMessageContent
+            chat_history.messages.append(ChatMessageContent(role="system", content=f"搜尋到的相關資料:\n{all_search_data}"))
+            chat_history.messages.append(ChatMessageContent(role="system", content="請根據上述資料回答用戶的問題。回答應結構清晰，並標註資訊來源。"))
             
             async for chunk in self.chat_service.get_streaming_chat_message_contents(
                 chat_history=chat_history,
