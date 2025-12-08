@@ -12,6 +12,7 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAICha
 from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.contents.chat_message_content import ChatMessageContent
+from semantic_kernel.contents.streaming_chat_message_content import StreamingChatMessageContent
 from semantic_kernel.connectors.ai import FunctionChoiceBehavior
 
 import httpx
@@ -452,222 +453,7 @@ class ModelExecutor:
             logger.error(f"[{request_id}] Model execution failed for {model_name}: {e}")
             raise
 
-    def _prepare_message_payload(self, messages: Optional[List[Any]]) -> List[Dict[str, str]]:
-        """Convert incoming messages to OpenAI-compatible payload."""
-        payload: List[Dict[str, str]] = []
-        if messages:
-            for message in messages:
-                if isinstance(message, dict):
-                    role = str(message.get("role", "user") or "user")
-                    content = str(message.get("content", "") or "")
-                else:
-                    role = getattr(message, "role", "user") or "user"
-                    content = getattr(message, "content", None)
-                    if content is None:
-                        content = str(message)
-                payload.append({"role": role, "content": content})
-        if not payload:
-            payload.append({"role": "user", "content": ""})
-        return payload
 
-    def _extract_text_from_chunk(self, payload: Dict[str, Any]) -> str:
-        """Extract incremental text from provider streaming payload."""
-        choices = payload.get("choices")
-        if isinstance(choices, list) and choices:
-            choice = choices[0] or {}
-            delta = choice.get("delta")
-            if isinstance(delta, dict):
-                content = delta.get("content")
-                if isinstance(content, str):
-                    return content
-            message = choice.get("message")
-            if isinstance(message, dict):
-                content = message.get("content")
-                if isinstance(content, str):
-                    return content
-        for field in ("response", "content", "text"):
-            value = payload.get(field)
-            if isinstance(value, str):
-                return value
-        return ""
-
-    async def _stream_provider(
-        self,
-        model_cfg: Dict[str, Any],
-        provider: str,
-        messages_payload: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: Optional[int],
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Provider-specific streaming yielding OpenAI-compatible chunks."""
-        if provider == "azure_openai":
-            async for event in self._stream_azure_openai(model_cfg, messages_payload, temperature, max_tokens):
-                yield event
-            return
-        if provider == "openai":
-            async for event in self._stream_openai(model_cfg, messages_payload, temperature, max_tokens):
-                yield event
-            return
-        if provider == "ollama":
-            async for event in self._stream_ollama(model_cfg, messages_payload, temperature, max_tokens):
-                yield event
-            return
-
-        raise ValueError(f"Streaming not supported for provider: {provider}")
-
-    async def _stream_azure_openai(
-        self,
-        model_cfg: Dict[str, Any],
-        messages_payload: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: Optional[int],
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        provider_cfg = config_manager.get_provider_config("azure_openai") or {}
-        endpoint = model_cfg.get("endpoint") or provider_cfg.get("endpoint")
-        api_key = model_cfg.get("api_key") or provider_cfg.get("api_key")
-        api_version = model_cfg.get("api_version") or provider_cfg.get("api_version")
-        deployment = model_cfg.get("deployment_name") or model_cfg.get("name")
-
-        if not endpoint or not api_key or not deployment or not api_version:
-            raise RuntimeError("Azure OpenAI streaming configuration is incomplete")
-
-        url = f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions"
-        params = {"api-version": api_version}
-        headers = {
-            "api-key": api_key,
-            "Content-Type": "application/json",
-        }
-        payload: Dict[str, Any] = {
-            "messages": messages_payload,
-            "stream": True,
-            "temperature": temperature,
-        }
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
-
-        session = await get_global_session()
-        async with session.post(url, headers=headers, params=params, json=payload) as response:
-            response.raise_for_status()
-            async for line in response.content:
-                line = line.decode('utf-8').strip()
-                if not line:
-                    continue
-                data_str = line[6:] if line.startswith("data:") else line
-                data_str = data_str.strip()
-                if not data_str:
-                    continue
-                if data_str == "[DONE]":
-                    break
-                try:
-                    event = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                yield event
-
-    async def _stream_openai(
-        self,
-        model_cfg: Dict[str, Any],
-        messages_payload: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: Optional[int],
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        provider_cfg = config_manager.get_provider_config("openai") or {}
-        base_url = (
-            model_cfg.get("endpoint")
-            or provider_cfg.get("base_url")
-            or provider_cfg.get("endpoint")
-            or "https://api.openai.com/v1"
-        )
-        api_key = model_cfg.get("api_key") or provider_cfg.get("api_key")
-        model_name = model_cfg.get("name")
-
-        if not api_key or not model_name:
-            raise RuntimeError("OpenAI streaming configuration is incomplete")
-
-        url = f"{base_url.rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload: Dict[str, Any] = {
-            "model": model_name,
-            "messages": messages_payload,
-            "stream": True,
-            "temperature": temperature,
-        }
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
-
-        session = await get_global_session()
-        async with session.post(url, headers=headers, json=payload) as response:
-            response.raise_for_status()
-            async for line in response.content:
-                line = line.decode('utf-8').strip()
-                if not line:
-                    continue
-                data_str = line[6:] if line.startswith("data:") else line
-                data_str = data_str.strip()
-                if not data_str:
-                    continue
-                if data_str == "[DONE]":
-                    break
-                try:
-                    event = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                yield event
-
-    async def _stream_ollama(
-        self,
-        model_cfg: Dict[str, Any],
-        messages_payload: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: Optional[int],
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        provider_cfg = config_manager.get_provider_config("ollama") or {}
-        base_url = model_cfg.get("endpoint") or provider_cfg.get("base_url") or "http://127.0.0.1:11434"
-        model_name = model_cfg.get("name")
-        if not model_name:
-            raise RuntimeError("Ollama model name missing")
-
-        url = f"{base_url.rstrip('/')}/api/chat"
-        payload: Dict[str, Any] = {
-            "model": model_name,
-            "messages": messages_payload,
-            "stream": True,
-            "options": {
-                "temperature": temperature,
-            },
-        }
-        if max_tokens:
-            payload["options"]["num_predict"] = max_tokens
-
-        session = await get_global_session()
-        async with session.post(url, json=payload) as response:
-            response.raise_for_status()
-            async for line in response.content:
-                if not line:
-                    continue
-                data_str = line.decode('utf-8').strip()
-                if not data_str:
-                    continue
-                try:
-                    event = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-
-                if "message" in event and isinstance(event["message"], dict):
-                    content = event["message"].get("content")
-                    if isinstance(content, str) and content:
-                        yield {
-                            "choices": [
-                                {
-                                    "delta": {"content": content},
-                                }
-                            ],
-                        }
-                if event.get("done"):
-                    break
 
     async def stream_generate(
         self,
@@ -723,7 +509,7 @@ class ModelExecutor:
                 yield {"type": "final", "payload": fake_response}
                 return
 
-            messages_payload = self._prepare_message_payload(messages)
+            # Send initial info event
             if routing_info:
                 yield {
                     "type": "info",
@@ -733,35 +519,53 @@ class ModelExecutor:
                     },
                 }
 
+            # Unified Execution Path using Semantic Kernel
+            kernel = await self._get_kernel_for_model(model_name)
+            if not kernel:
+                raise RuntimeError(f"Could not create kernel for model {model_name}")
+
+            # Prepare Chat History
+            chat_history = ChatHistory()
+            if messages:
+                for m in messages:
+                    role = getattr(m, 'role', None) or m.get('role', 'user') if isinstance(m, dict) else 'user'
+                    content = getattr(m, 'content', None) or m.get('content', '') if isinstance(m, dict) else str(m)
+                    if role == 'system':
+                        chat_history.add_system_message(content)
+                    else:
+                        chat_history.add_message(ChatMessageContent(role=role, content=content))
+            else:
+                chat_history.add_message(ChatMessageContent(role='user', content=''))
+
+            # Get Service and Settings
+            chat_completion = kernel.get_service(type=ChatCompletionClientBase)
+            execution_settings = kernel.get_prompt_execution_settings_from_service_id(
+                service_id=chat_completion.service_id
+            )
+            self._apply_generation_settings(execution_settings, model_cfg, temperature, max_tokens)
+
+            # Execute Streaming
             text_buffer = ""
-            usage_from_provider: Optional[Dict[str, Any]] = None
-
-            async for raw_event in self._stream_provider(
-                model_cfg=model_cfg,
-                provider=provider,
-                messages_payload=messages_payload,
-                temperature=temperature,
-                max_tokens=max_tokens,
+            
+            async for content_list in chat_completion.get_streaming_chat_message_contents(
+                chat_history=chat_history,
+                settings=execution_settings,
+                kernel=kernel
             ):
-                if not isinstance(raw_event, dict):
-                    continue
-                
-                # Minimal modification - avoid full dict copy
-                if "model" not in raw_event:
-                    raw_event["model"] = model_name
-                if routing_info and "routing_info" not in raw_event:
-                    raw_event["routing_info"] = routing_info
+                for content in content_list:
+                    if content.content:
+                        text_buffer += content.content
+                        yield {
+                            "type": "delta",
+                            "payload": {
+                                "choices": [{"delta": {"content": content.content}}],
+                                "model": model_name,
+                                "routing_info": routing_info
+                            }
+                        }
 
-                delta_text = self._extract_text_from_chunk(raw_event)
-                if delta_text:
-                    text_buffer += delta_text
-
-                if isinstance(raw_event.get("usage"), dict):
-                    usage_from_provider = raw_event["usage"]
-
-                yield {"type": "delta", "payload": raw_event}
-
-            usage = usage_from_provider or self._calculate_usage(messages, text_buffer)
+            # Calculate usage
+            usage = self._calculate_usage(messages, text_buffer)
 
             # Build final routing info
             final_routing = routing_info.copy() if routing_info else {}
@@ -1013,8 +817,13 @@ class ModelExecutor:
                         payload = {
                             "model": self._model_name,
                             "messages": messages,
-                            "stream": False
+                            "stream": False,
+                            "options": {}
                         }
+                        
+                        if settings:
+                            if hasattr(settings, 'temperature'):
+                                payload["options"]["temperature"] = settings.temperature
 
                         logger.debug(f"Calling Ollama: {self._base_url}/api/chat")
 
@@ -1033,6 +842,67 @@ class ModelExecutor:
 
                         except Exception as e:
                             logger.error(f"Ollama execution failed: {e}")
+                            raise
+
+                    async def get_streaming_chat_message_contents(
+                        self,
+                        chat_history: ChatHistory,
+                        settings=None,
+                        **kwargs
+                    ):
+                        """Execute streaming chat completion using global connection pool."""
+                        messages = [
+                            {
+                                "role": getattr(msg, 'role', 'user'),
+                                "content": getattr(msg, 'content', '')
+                            }
+                            for msg in chat_history.messages
+                        ]
+
+                        payload = {
+                            "model": self._model_name,
+                            "messages": messages,
+                            "stream": True,
+                            "options": {}
+                        }
+                        
+                        if settings:
+                            if hasattr(settings, 'temperature'):
+                                payload["options"]["temperature"] = settings.temperature
+                            if hasattr(settings, 'max_tokens'):
+                                payload["options"]["num_predict"] = settings.max_tokens
+
+                        try:
+                            session = await get_global_session()
+                            async with session.post(
+                                f"{self._base_url}/api/chat",
+                                json=payload
+                            ) as resp:
+                                resp.raise_for_status()
+                                async for line in resp.content:
+                                    if not line:
+                                        continue
+                                    data_str = line.decode('utf-8').strip()
+                                    if not data_str:
+                                        continue
+                                    try:
+                                        event = json.loads(data_str)
+                                    except json.JSONDecodeError:
+                                        continue
+
+                                    if "message" in event and isinstance(event["message"], dict):
+                                        content = event["message"].get("content")
+                                        if isinstance(content, str) and content:
+                                            yield [StreamingChatMessageContent(
+                                                role="assistant", 
+                                                content=content, 
+                                                choice_index=0,
+                                                inner_content=event
+                                            )]
+                                    if event.get("done"):
+                                        break
+                        except Exception as e:
+                            logger.error(f"Ollama streaming failed: {e}")
                             raise
 
                 ollama_service = OllamaChatCompletion(
