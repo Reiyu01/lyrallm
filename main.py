@@ -30,6 +30,7 @@ load_dotenv()
 
 from lyrallm.config.config_manager import config_manager
 from lyrallm.logger_service.event_consumer import start_event_consumer
+from lyrallm.core.exceptions import LyraError
 from api.models import router as models_router
 from api.chat import router as chat_router
 
@@ -145,6 +146,21 @@ async def log_requests(request: Request, call_next):
     return response
     
     return response
+
+@app.exception_handler(LyraError)
+async def lyra_exception_handler(request: Request, exc: LyraError):
+    """Lyra 業務異常處理"""
+    logger.warning(f"業務異常 {request.url}: {exc.message} (Code: {exc.code})")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+                "details": exc.details
+            }
+        }
+    )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

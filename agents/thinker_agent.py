@@ -115,6 +115,7 @@ class ThinkerAgent:
         self.name = name
         self.chat_service = chat_service
         self.search_agent: Optional['SearchAgent'] = None
+        self.rag_agent: Optional[Any] = None
         
         # 創建 ChatCompletionAgent
         self.agent = ChatCompletionAgent(
@@ -1103,7 +1104,7 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             return
 
         try:
-            yield {"type": "thought", "content": f"🧠 {self.name} 開始處理查詢..."}
+            # yield {"type": "thought", "content": f"🧠 {self.name} 開始處理查詢..."}
             
             # 重置搜尋歷史
             self.search_history = []
@@ -1126,26 +1127,26 @@ NEXT_SEARCH_QUERY: [如果需要繼續，建議具體的搜尋查詢]
             if self.rag_agent:
                 available_tools.append("RAG")
             
-            yield {"type": "thought", "content": f"🛠️ 可用工具: {available_tools}"}
+            # yield {"type": "thought", "content": f"🛠️ 可用工具: {available_tools}"}
             
             # 第一步：初始決策
             if not available_tools:
-                yield {"type": "thought", "content": "📝 無可用工具，直接回答"}
+                # yield {"type": "thought", "content": "📝 無可用工具，直接回答"}
                 async for chunk in self._provide_direct_answer_stream(chat_history):
                     yield chunk
                 return
             
             if self._has_explicit_tool_request(user_query):
-                yield {"type": "thought", "content": "🎯 檢測到明確工具請求，跳過初始決策"}
+                # yield {"type": "thought", "content": "🎯 檢測到明確工具請求，跳過初始決策"}
                 initial_decision = {'mode': 'AGENT_MODE', 'reason': '明確工具請求', 'confidence': 10}
             else:
-                yield {"type": "thought", "content": "🤔 正在進行初始決策..."}
+                # yield {"type": "thought", "content": "🤔 正在進行初始決策..."}
                 initial_decision = await self._make_initial_decision(user_query, available_tools)
             
             yield {"type": "decision", "content": initial_decision}
             
             if initial_decision['mode'] == 'DIRECT_ANSWER':
-                yield {"type": "thought", "content": "🤔 決定直接回答"}
+                # yield {"type": "thought", "content": "🤔 決定直接回答"}
                 async for chunk in self._provide_direct_answer_stream(chat_history):
                     yield chunk
                 return
