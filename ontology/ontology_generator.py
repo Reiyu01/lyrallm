@@ -142,7 +142,7 @@ class OntologyGenerator:
                 "source_file": table_schema.metadata.get("source_file"),
                 "row_count": table_schema.row_count,
                 "column_count": len(table_schema.columns),
-                "security_classification": table_schema.security_classification.value,
+                "security_classification": table_schema.suggested_security_level.value,
                 "created_by": user_id,
                 "organization_id": organization_id
             }
@@ -214,18 +214,19 @@ class OntologyGenerator:
         obj = OntologyObject(
             object_id=object_id,
             object_type=self._map_to_object_type(mapping.object_type),
-            name=f"{mapping.display_name} (Row {row_index})",
+            title=f"{mapping.display_name} (Row {row_index})",
             description=f"從表格 {mapping.table_name} 第 {row_index} 行生成",
             security_label=security_label,
             access_control=access_control,
+            created_by=user_id,
+            parent_id=None,  # 稍後會根據外鍵設置
             metadata={
                 "ontology_id": ontology_id,
                 "table_name": mapping.table_name,
                 "row_index": row_index,
-                "source": "table_upload"
-            },
-            attributes=attributes,
-            parent_id=None  # 稍後會根據外鍵設置
+                "source": "table_upload",
+                "attributes": attributes
+            }
         )
         
         return obj
@@ -285,8 +286,8 @@ class OntologyGenerator:
         """創建安全標籤"""
         return SecurityLabel(
             classification=classification.value.upper(),
-            categories=[],
-            caveats=[]
+            categories=set(),
+            handling_caveats=set()
         )
     
     def _create_access_control(
@@ -310,11 +311,11 @@ class OntologyGenerator:
         
         return AccessControl(
             owner_id=user_id,
-            organization_id=organization_id,
-            allowed_roles=roles,
-            allowed_users=[user_id],
-            denied_users=[],
-            permissions=["read", "write", "delete"] if user_id else ["read"]
+            owner_type="user",
+            allowed_roles=frozenset(roles),
+            allowed_users=frozenset([user_id] if user_id else []),
+            denied_users=frozenset(),
+            allowed_organizations=frozenset([organization_id] if organization_id else [])
         )
     
     def _map_to_object_type(self, ontology_object_type: OntologyObjectType) -> ObjectType:
@@ -460,10 +461,10 @@ class BatchOntologyGenerator:
     ) -> Dict[Any, str]:
         """提取主鍵映射"""
         pk_map = {}
-        pk_columns = [col for col in table_schema.columns if col.is_primary_key]
+        pk_columns = [col for col in table_schema.columns if col.primary_key]
         
         if pk_columns:
-            pk_column = pk_columns[0].internal_name
+            pk_column = pk_columns[0].name
             for idx, row in table_data.iterrows():
                 pk_value = row[pk_column]
                 if not pd.isna(pk_value):
@@ -484,10 +485,10 @@ class BatchOntologyGenerator:
         # 遍歷每個表格
         for result, (table_schema, table_data) in zip(results, tables):
             # 查找外鍵欄位
-            fk_columns = [col for col in table_schema.columns if col.is_foreign_key]
+            fk_columns = [col for col in table_schema.columns if col.foreign_key]
             
             for fk_col in fk_columns:
-                target_table = fk_col.foreign_key_table
+                target_table = fk_col.foreign_key
                 
                 # 檢查目標表是否存在
                 if target_table not in all_primary_key_maps:
@@ -497,7 +498,7 @@ class BatchOntologyGenerator:
                 
                 # 遍歷當前表的每一行
                 for idx, row in table_data.iterrows():
-                    fk_value = row[fk_col.internal_name]
+                    fk_value = row[fk_col.name]
                     
                     if pd.isna(fk_value):
                         continue
@@ -514,7 +515,7 @@ class BatchOntologyGenerator:
                             "source_object_id": source_object_id,
                             "target_object_id": target_object_id,
                             "relationship_type": "references",
-                            "foreign_key": fk_col.internal_name,
+                            "foreign_key": fk_col.name,
                             "foreign_key_value": fk_value
                         })
         

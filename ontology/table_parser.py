@@ -220,8 +220,8 @@ class TableParser:
         series = self.df[col_name]
         
         # 基本屬性
-        nullable = series.isnull().any()
-        unique = series.nunique() == len(series)
+        nullable = bool(series.isnull().any())
+        unique = bool(series.nunique() == len(series))
         
         # 檢測數據類型
         data_type = self._infer_data_type(series)
@@ -247,7 +247,16 @@ class TableParser:
         display_name = self._generate_display_name(col_name)
         
         # 取樣本值
-        sample_values = series.dropna().head(5).tolist()
+        # 確保轉換為 Python 原生類型
+        raw_samples = series.dropna().head(5).tolist()
+        sample_values = []
+        for val in raw_samples:
+            if hasattr(val, 'item'):
+                sample_values.append(val.item())
+            elif isinstance(val, (pd.Timestamp, datetime)):
+                sample_values.append(val.isoformat())
+            else:
+                sample_values.append(val)
         
         return ColumnSchema(
             name=col_name,
@@ -303,11 +312,14 @@ class TableParser:
     
     def _is_date_column(self, series: pd.Series) -> bool:
         """檢查是否為日期列"""
-        try:
-            pd.to_datetime(series.head(10), errors='raise')
-            return True
-        except:
-            return False
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                pd.to_datetime(series.head(10), errors='raise')
+                return True
+            except:
+                return False
     
     def _is_json_column(self, series: pd.Series) -> bool:
         """檢查是否為 JSON 列"""

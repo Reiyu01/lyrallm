@@ -175,9 +175,9 @@ class SchemaMapper:
         mapping = OntologyMapping(
             table_name=table_schema.table_name,
             object_type=object_type,
-            display_name=table_schema.display_name,
+            display_name=table_schema.table_name,
             description=f"從表格 {table_schema.table_name} 自動生成的本體對象",
-            security_classification=table_schema.security_classification,
+            security_classification=table_schema.suggested_security_level,
             metadata={
                 "source_file": table_schema.metadata.get("source_file"),
                 "row_count": table_schema.row_count,
@@ -192,11 +192,11 @@ class SchemaMapper:
         
         # 建立關係映射（基於外鍵）
         for column in table_schema.columns:
-            if column.is_foreign_key and column.foreign_key_table:
+            if column.foreign_key:
                 mapping.add_relationship(
                     rel_type="belongs_to",
-                    target_table=column.foreign_key_table,
-                    foreign_key=column.internal_name
+                    target_table=column.foreign_key,
+                    foreign_key=column.name
                 )
         
         # 存儲映射
@@ -228,7 +228,7 @@ class SchemaMapper:
         # 檢查是否為純關聯表（只有外鍵和可能的主鍵）
         non_key_columns = [
             col for col in table_schema.columns
-            if not col.is_primary_key and not col.is_foreign_key
+            if not col.primary_key and not col.foreign_key
         ]
         
         if len(non_key_columns) == 0 and len(table_schema.columns) >= 2:
@@ -254,14 +254,14 @@ class SchemaMapper:
         
         # 創建屬性映射
         return AttributeMapping(
-            source_column=column.internal_name,
-            target_attribute=self._sanitize_attribute_name(column.internal_name),
+            source_column=column.name,
+            target_attribute=self._sanitize_attribute_name(column.name),
             attribute_type=ontology_type,
             is_required=column.nullable == False,
-            is_unique=column.is_unique,
-            is_primary_key=column.is_primary_key,
-            is_foreign_key=column.is_foreign_key,
-            reference_table=column.foreign_key_table,
+            is_unique=column.unique,
+            is_primary_key=column.primary_key,
+            is_foreign_key=bool(column.foreign_key),
+            reference_table=column.foreign_key,
             security_classification=column.security_classification,
             description=f"來自欄位: {column.display_name}",
             validation_rules=self._generate_validation_rules(column)
@@ -305,7 +305,7 @@ class SchemaMapper:
             rules.append("required")
         
         # 唯一性驗證
-        if column.is_unique:
+        if column.unique:
             rules.append("unique")
         
         # 類型驗證
@@ -321,8 +321,8 @@ class SchemaMapper:
             rules.append("type:datetime")
         
         # 外鍵驗證
-        if column.is_foreign_key and column.foreign_key_table:
-            rules.append(f"foreign_key:{column.foreign_key_table}")
+        if column.foreign_key:
+            rules.append(f"foreign_key:{column.foreign_key}")
         
         return rules
     

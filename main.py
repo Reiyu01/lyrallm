@@ -34,6 +34,7 @@ from lyrallm.core.exceptions import LyraError
 from api.models import router as models_router
 from api.chat import router as chat_router
 from api.table_upload import router as table_router
+from api.ontology import router as ontology_router
 
 # 設定日誌
 logging_config = config_manager.get_logging_config()
@@ -129,6 +130,7 @@ app.add_middleware(
 app.include_router(models_router, tags=["Models"])
 app.include_router(chat_router, tags=["Chat"])
 app.include_router(table_router, tags=["Table Upload"])
+app.include_router(ontology_router, tags=["Ontology"])
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

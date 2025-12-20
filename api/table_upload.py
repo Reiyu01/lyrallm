@@ -7,14 +7,16 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
+from datetime import datetime
 import uuid
 import pandas as pd
+import numpy as np
 import io
 
 from ontology.table_parser import parse_table_file, TableSchema, ColumnSchema, TableParser
 from ontology.ontology_generator import OntologyGenerator, GenerationResult
-from auth.dependencies import get_current_user_context
-from models.user_context import UserContext
+from ontology.store import ontology_store
+from auth.dependencies import get_request_security_context, RequestSecurityContext
 
 
 router = APIRouter(prefix="/api/table", tags=["Table Upload"])
@@ -73,6 +75,51 @@ upload_cache: Dict[str, Dict[str, Any]] = {}
 # Helper Functions
 # ============================================================================
 
+def _convert_to_serializable(value: Any) -> Any:
+    """
+    將 pandas/numpy 類型轉換為可序列化的 Python 原生類型
+    
+    Args:
+        value: 待轉換的值
+        
+    Returns:
+        可序列化的 Python 原生類型
+    """
+    # 處理 NaN/None
+    if pd.isna(value):
+        return None
+    
+    # 處理 numpy 布爾類型
+    if isinstance(value, np.bool_):
+        return bool(value)
+    
+    # 處理 numpy 整數類型
+    if isinstance(value, np.integer):
+        return int(value)
+    
+    # 處理 numpy 浮點類型
+    if isinstance(value, np.floating):
+        return float(value)
+    
+    # 處理時間類型
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    
+    # 處理 numpy 字符串類型
+    if isinstance(value, np.str_):
+        return str(value)
+    
+    # 通用 numpy 類型處理（有 .item() 方法）
+    if hasattr(value, 'item'):
+        try:
+            return value.item()
+        except (ValueError, TypeError):
+            pass
+    
+    # 其他類型直接返回
+    return value
+
+
 def _apply_column_mappings(
     table_schema: TableSchema,
     mappings: List[ColumnMappingUpdate]
@@ -94,8 +141,8 @@ def _apply_column_mappings(
     
     # 更新每個列的配置
     for column in table_schema.columns:
-        if column.internal_name in mapping_dict:
-            mapping = mapping_dict[column.internal_name]
+        if column.name in mapping_dict:
+            mapping = mapping_dict[column.name]
             
             # 更新顯示名稱
             if mapping.display_name:
@@ -131,7 +178,7 @@ def _apply_column_mappings(
 @router.post("/upload", response_model=TableUploadResponse)
 async def upload_table_file(
     file: UploadFile = File(...),
-    user_context: UserContext = Depends(get_current_user_context)
+    security_ctx: RequestSecurityContext = Depends(get_request_security_context)
 ):
     """
     上傳表格文件並解析 Schema
@@ -158,11 +205,20 @@ async def upload_table_file(
     
     try:
         # 解析表格
-        schema, preview_data = parse_table_file(content, file.filename)
-        
-        # 解析完整數據為 DataFrame（用於後續生成本體）
         parser = TableParser()
-        full_dataframe = parser._parse_file_content(content, file.filename)
+        schema = parser.parse_file(content, file.filename)
+        
+        # 獲取完整的 DataFrame（parser.df 已經在 parse_file 中設置）
+        full_dataframe = parser.df
+        
+        # 提取預覽數據（前 10 行）- 確保所有值都可序列化
+        preview_df = full_dataframe.head(10)
+        # 將所有值轉換為可序列化的 Python 原生類型
+        preview_data = []
+        for _, row in preview_df.iterrows():
+            row_dict = {col_name: _convert_to_serializable(value) 
+                       for col_name, value in row.items()}
+            preview_data.append(row_dict)
         
         # 生成上傳 ID
         upload_id = str(uuid.uuid4())
@@ -173,7 +229,7 @@ async def upload_table_file(
             "preview_data": preview_data,
             "dataframe": full_dataframe,
             "filename": file.filename,
-            "user_id": user_context.user_id,
+            "user_id": security_ctx.user_id or "anonymous",
             "uploaded_at": schema.metadata["parsed_at"],
         }
         
@@ -203,7 +259,7 @@ async def upload_table_file(
 @router.get("/upload/{upload_id}")
 async def get_upload_info(
     upload_id: str,
-    user_context: UserContext = Depends(get_current_user_context)
+    security_ctx: RequestSecurityContext = Depends(get_request_security_context)
 ):
     """獲取上傳的表格信息"""
     if upload_id not in upload_cache:
@@ -212,22 +268,34 @@ async def get_upload_info(
     cached = upload_cache[upload_id]
     
     # 驗證用戶權限
-    if cached["user_id"] != user_context.user_id:
+    user_id = security_ctx.user_id or "anonymous"
+    if cached["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="無權訪問此上傳記錄")
     
+    schema = cached["schema"]
+    suggested_mappings = {
+        "object_type": schema.suggested_object_type,
+        "security_level": schema.suggested_security_level.value,
+        "primary_keys": schema.primary_keys,
+        "foreign_keys": schema.foreign_keys,
+    }
+
     return {
         "upload_id": upload_id,
-        "schema": cached["schema"].to_dict(),
+        "schema": schema.to_dict(),
         "preview_data": cached["preview_data"],
         "filename": cached["filename"],
         "uploaded_at": cached["uploaded_at"],
+        "row_count": schema.row_count,
+        "column_count": len(schema.columns),
+        "suggested_mappings": suggested_mappings,
     }
 
 
 @router.post("/confirm", response_model=OntologyGenerationResponse)
 async def confirm_schema_and_generate_ontology(
     confirmation: SchemaConfirmation,
-    user_context: UserContext = Depends(get_current_user_context)
+    security_ctx: RequestSecurityContext = Depends(get_request_security_context)
 ):
     """
     確認 Schema 映射並生成本體
@@ -241,7 +309,8 @@ async def confirm_schema_and_generate_ontology(
     cached = upload_cache[confirmation.upload_id]
     
     # 驗證用戶權限
-    if cached["user_id"] != user_context.user_id:
+    user_id = security_ctx.user_id or "anonymous"
+    if cached["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="無權訪問此上傳記錄")
     
     try:
@@ -261,9 +330,12 @@ async def confirm_schema_and_generate_ontology(
         result = generator.generate_from_table(
             table_schema=table_schema,
             table_data=dataframe,
-            user_id=user_context.user_id,
-            organization_id=getattr(user_context, 'organization_id', None)
+            user_id=security_ctx.user_id or "anonymous",
+            organization_id=None  # TODO: Extract from security_ctx if needed
         )
+        
+        # 保存到本體存儲
+        ontology_store.save_ontology(result)
         
         ontology_id = result.ontology_id
         object_count = result.object_count
@@ -287,14 +359,15 @@ async def confirm_schema_and_generate_ontology(
 @router.delete("/upload/{upload_id}")
 async def delete_upload(
     upload_id: str,
-    user_context: UserContext = Depends(get_current_user_context)
+    security_ctx: RequestSecurityContext = Depends(get_request_security_context)
 ):
     """刪除上傳記錄"""
     if upload_id not in upload_cache:
         raise HTTPException(status_code=404, detail="上傳記錄不存在")
     
     cached = upload_cache[upload_id]
-    if cached["user_id"] != user_context.user_id:
+    user_id = security_ctx.user_id or "anonymous"
+    if cached["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="無權刪除此上傳記錄")
     
     del upload_cache[upload_id]
@@ -303,12 +376,13 @@ async def delete_upload(
 
 @router.get("/uploads")
 async def list_uploads(
-    user_context: UserContext = Depends(get_current_user_context)
+    security_ctx: RequestSecurityContext = Depends(get_request_security_context)
 ):
     """列出當前用戶的所有上傳記錄"""
     user_uploads = []
+    user_id = security_ctx.user_id or "anonymous"
     for upload_id, cached in upload_cache.items():
-        if cached["user_id"] == user_context.user_id:
+        if cached["user_id"] == user_id:
             user_uploads.append({
                 "upload_id": upload_id,
                 "filename": cached["filename"],
