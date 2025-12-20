@@ -44,6 +44,29 @@ from .guardrails import (
     RateLimitGuardrail
 )
 
+from .table_parser import (
+    TableParser,
+    TableSchema,
+    ColumnSchema,
+    ColumnType,
+    SecurityClassification
+)
+
+from .schema_mapper import (
+    SchemaMapper,
+    OntologyMapping,
+    AttributeMapping,
+    MappingOptimizer,
+    OntologyAttributeType,
+    OntologyObjectType
+)
+
+from .ontology_generator import (
+    OntologyGenerator,
+    GenerationResult,
+    BatchOntologyGenerator
+)
+
 __all__ = [
     # Objects
     'OntologyObject',
@@ -76,4 +99,24 @@ __all__ = [
     'ContentGuardrail',
     'CostGuardrail',
     'RateLimitGuardrail',
+    
+    # Table Parser
+    'TableParser',
+    'TableSchema',
+    'ColumnSchema',
+    'ColumnType',
+    'SecurityClassification',
+    
+    # Schema Mapper
+    'SchemaMapper',
+    'OntologyMapping',
+    'AttributeMapping',
+    'MappingOptimizer',
+    'OntologyAttributeType',
+    'OntologyObjectType',
+    
+    # Ontology Generator
+    'OntologyGenerator',
+    'GenerationResult',
+    'BatchOntologyGenerator',
 ]
